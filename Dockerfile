@@ -29,7 +29,7 @@ RUN apk add --no-cache libc6-compat
 # Copy dependencies and source, then build the optimized Next.js bundle
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+RUN mkdir -p public && npm run build
 
 # ==========================================
 # Stage 3: Runtime (Slim Execution)
@@ -53,7 +53,6 @@ RUN apk add --no-cache libc6-compat \
 # [OPTIMIZATION] Copy only traced standalone output instead of full node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 # Run as non-root in production
 USER nextjs
