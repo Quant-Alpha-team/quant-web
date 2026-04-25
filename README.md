@@ -49,9 +49,11 @@ quant-web/
 ├── lib/
 │   ├── backend-api.ts             # Backend API client and pagination layer
 │   ├── dashboard.ts               # Date, KPI, formatting, and chart helpers
+│   ├── logger.ts                  # Server-side dashboard logger and rotation
 │   └── types.ts                   # Shared TypeScript data contracts
 ├── bin/
 │   └── quant-web.mjs              # CLI entry point (`quant-web`)
+├── .env                           # Environment variable template
 ├── package.json                   # npm scripts and dependencies
 └── tsconfig.json
 ```
@@ -83,6 +85,13 @@ Common settings:
   fetch caps (set `0` to disable a cap)
 - `API_PREFLIGHT_STRICT`: whether startup should fail when the backend API is
   unavailable (`false` by default)
+- `LOG_DIR`: directory for dashboard log files (`log` by default)
+- `LOG_FILE`: active dashboard log filename (`dashboard.log` by default)
+- `LOG_LEVEL`: minimum log level (`DEBUG`, `INFO`, `WARNING`, or `ERROR`)
+- `LOG_RETENTION_DAYS`: number of days to retain rotated `dashboard-YYYY-MM-DD.log`
+  files (`7` by default)
+- `TZ`: local timezone used in log timestamps and daily log filenames, for
+  example `America/New_York`
 
 ### 3. Run
 

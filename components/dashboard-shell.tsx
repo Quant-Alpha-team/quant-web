@@ -541,6 +541,7 @@ export function DashboardShell() {
           startDate: range.startDate,
           endDate: range.endDate,
           timezone,
+          section,
           ...includes,
         }),
       })

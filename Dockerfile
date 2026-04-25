@@ -46,7 +46,9 @@ WORKDIR /app
 # Install runtime-only system libs and create an unprivileged user
 RUN apk add --no-cache libc6-compat \
   && addgroup -S nodejs \
-  && adduser -S nextjs -G nodejs
+  && adduser -S nextjs -G nodejs \
+  && mkdir -p /app/log \
+  && chown -R nextjs:nodejs /app/log
 
 # [OPTIMIZATION] Copy only traced standalone output instead of full node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./

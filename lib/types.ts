@@ -67,6 +67,7 @@ export type DashboardQuery = {
   startDate: string;
   endDate: string;
   timezone: string;
+  section: SectionId;
   includeExec: boolean;
   includePerf: boolean;
   includePnl: boolean;
@@ -85,4 +86,3 @@ export type KpiCards = {
   openTrades: number;
   totalCommission: number;
 };
-

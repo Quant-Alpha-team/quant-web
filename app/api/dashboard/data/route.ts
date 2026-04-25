@@ -4,12 +4,29 @@ import {
   getStrategyDailyPnl,
   getTradeExecutions,
 } from "@/lib/backend-api";
-import type { DashboardData, DashboardQuery } from "@/lib/types";
+import { logError, logInfo } from "@/lib/logger";
+import type { DashboardData, DashboardQuery, SectionId } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+const sectionLabels: Record<SectionId, string> = {
+  overview: "\u{1F4C8} Overview",
+  "strategy-pnl": "\u{1F4CA} Strategy P&L",
+  "account-equity": "\u{1F3E6} Account Equity",
+  "trade-logs": "\u{1F4DD} Trade Logs",
+  diagnostics: "Diagnostics",
+};
 
 function stringValue(value: unknown, fallback: string) {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function sectionValue(value: unknown): SectionId {
+  return typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(sectionLabels, value)
+    ? (value as SectionId)
+    : "overview";
 }
 
 function boolValue(value: unknown) {
@@ -26,10 +43,23 @@ export async function POST(request: Request) {
       startDate: stringValue(body.startDate, today),
       endDate: stringValue(body.endDate, today),
       timezone: stringValue(body.timezone, "Asia/Taipei"),
+      section: sectionValue(body.section),
       includeExec: boolValue(body.includeExec),
       includePerf: boolValue(body.includePerf),
       includePnl: boolValue(body.includePnl),
     };
+
+    logInfo("Dashboard session started", {
+      page: "QuantX Performance Dashboard",
+      layout: "wide",
+    });
+    logInfo("Filters applied", {
+      strategy: query.strategy,
+      account: query.accountId,
+      start: query.startDate,
+      end: query.endDate,
+      tz: query.timezone,
+    });
 
     const [execRows, perfRows, pnlRows] = await Promise.all([
       query.includeExec ? getTradeExecutions(query) : Promise.resolve([]),
@@ -38,12 +68,19 @@ export async function POST(request: Request) {
     ]);
 
     const data: DashboardData = { execRows, perfRows, pnlRows };
+    logInfo("Data loaded", {
+      section: sectionLabels[query.section],
+      exec_rows: execRows.length,
+      equity_rows: perfRows.length,
+      pnl_rows: pnlRows.length,
+    });
     return Response.json({ ok: true, data });
   } catch (error) {
     const message =
       error instanceof BackendApiError || error instanceof Error
         ? error.message
         : String(error);
+    logError("Data load failed", { error: message });
     return Response.json(
       {
         ok: false,
@@ -54,4 +91,3 @@ export async function POST(request: Request) {
     );
   }
 }
-
