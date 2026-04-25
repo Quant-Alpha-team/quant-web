@@ -20,6 +20,7 @@
   --loss: #fb7185;
   --warning: #fbbf24;
   --shadow: rgba(0, 5, 18, 0.38);
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -67,6 +68,37 @@ button,
 input,
 select {
   font: inherit;
+}
+
+input,
+select {
+  background-color: rgba(255, 255, 255, 0.09);
+  color: var(--foreground);
+  color-scheme: dark;
+}
+
+select option,
+select optgroup {
+  background-color: #0d253f;
+  color: var(--foreground);
+}
+
+select option:checked {
+  background:
+    linear-gradient(0deg, rgba(45, 212, 191, 0.22), rgba(45, 212, 191, 0.22)),
+    #0d253f;
+  color: var(--foreground);
+}
+
+select option:hover,
+select option:focus {
+  background-color: #164e63;
+  color: var(--foreground);
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) sepia(0.3) saturate(0.6) hue-rotate(145deg);
+  opacity: 0.78;
 }
 
 button:focus-visible,
