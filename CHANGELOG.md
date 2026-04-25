@@ -1,3 +1,9 @@
+## v0.2.5 (2026-04-24)
+
+### Fix
+
+- **web**: fix the ubuntu's ui problem
+
 ## v0.2.4 (2026-04-24)
 
 ### Fix
