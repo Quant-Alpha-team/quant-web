@@ -10,4 +10,5 @@ version_files = [
   'package-lock.json:^  "version": "(?P<version>[^"]+)"',
   'package-lock.json:^      "version": "(?P<version>[^"]+)"',
   'README.md:^\*\*Version\*\*: (?P<version>.*)',
+  'scripts/build.sh:IMG_VERSION'
 ]
