@@ -1,3 +1,13 @@
+## v0.2.2 (2026-04-25)
+
+### Feat
+
+- **docker**: add docker's part
+
+### Fix
+
+- **env**: remove env's yaml
+
 ## v0.2.1 (2026-04-25)
 
 ### Fix
