@@ -1,3 +1,9 @@
+## v0.2.1 (2026-04-25)
+
+### Fix
+
+- add missing changelog
+
 ## v0.2.0 (2026-04-25)
 
 ### Feat
