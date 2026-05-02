@@ -88,7 +88,7 @@ Common settings:
 - `LOG_DIR`: directory for dashboard log files (`log` by default)
 - `LOG_FILE`: active dashboard log filename (`dashboard.log` by default)
 - `LOG_LEVEL`: minimum log level (`DEBUG`, `INFO`, `WARNING`, or `ERROR`)
-- `LOG_RETENTION_DAYS`: number of days to retain rotated `dashboard-YYYY-MM-DD.log`
+- `LOG_RETENTION_DAYS`: number of days to retain rotated `dashboard.log.YYYY-MM-DD`
   files (`7` by default)
 - `TZ`: local timezone used in log timestamps and daily log filenames, for
   example `America/New_York`
