@@ -1,3 +1,9 @@
+## v0.2.6 (2026-05-01)
+
+### Fix
+
+- **log**: replace dashboard-YYYY-MM-DD.log to dashboard.log.YYYY-MM-DD
+
 ## v0.2.5 (2026-04-24)
 
 ### Fix

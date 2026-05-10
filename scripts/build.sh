@@ -5,7 +5,7 @@
 # Default mode is 'local' unless specified
 MODE=${1:-local} 
 IMG_NAME="quant-web"
-IMG_VERSION="0.2.5"
+IMG_VERSION="0.2.6"
 BUILDER_NAME="mybuilder"
 
 ## Define image tags for local and remote registries

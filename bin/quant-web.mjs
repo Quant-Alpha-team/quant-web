@@ -126,6 +126,12 @@ function escapedRegExp(value) {
 }
 
 function archivedLogPattern(fileName) {
+  return new RegExp(
+    `^${escapedRegExp(fileName)}\\.\\d{4}-\\d{2}-\\d{2}(?:-\\d+)?$`,
+  );
+}
+
+function legacyArchivedLogPattern(fileName) {
   const extensionIndex = fileName.lastIndexOf(".");
   const stem = extensionIndex > 0 ? fileName.slice(0, extensionIndex) : fileName;
   const extension = extensionIndex > 0 ? fileName.slice(extensionIndex) : "";
@@ -138,9 +144,10 @@ function archivedLogPattern(fileName) {
 
 function pruneOldLogs(dir, retainDays) {
   const cutoff = Date.now() - retainDays * 24 * 60 * 60 * 1000;
-  const pattern = archivedLogPattern(getLoggerConfig().fileName);
+  const fileName = getLoggerConfig().fileName;
+  const patterns = [archivedLogPattern(fileName), legacyArchivedLogPattern(fileName)];
   for (const file of readdirSync(dir)) {
-    if (!pattern.test(file)) {
+    if (!patterns.some((pattern) => pattern.test(file))) {
       continue;
     }
     const path = join(dir, file);
@@ -151,21 +158,18 @@ function pruneOldLogs(dir, retainDays) {
 }
 
 function archivedLogPath(dir, fileName, date) {
-  const extensionIndex = fileName.lastIndexOf(".");
-  const stem = extensionIndex > 0 ? fileName.slice(0, extensionIndex) : fileName;
-  const extension = extensionIndex > 0 ? fileName.slice(extensionIndex) : "";
-  const basePath = join(dir, `${stem}-${date}${extension}`);
+  const basePath = join(dir, `${fileName}.${date}`);
   if (!existsSync(basePath)) {
     return basePath;
   }
 
   for (let index = 1; index < 1000; index += 1) {
-    const path = join(dir, `${stem}-${date}-${index}${extension}`);
+    const path = join(dir, `${fileName}.${date}-${index}`);
     if (!existsSync(path)) {
       return path;
     }
   }
-  return join(dir, `${stem}-${date}-${Date.now()}${extension}`);
+  return join(dir, `${fileName}.${date}-${Date.now()}`);
 }
 
 function fileLocalDate(path) {
