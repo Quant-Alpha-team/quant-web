@@ -10,7 +10,7 @@ MODE=${1:-local}
 SOURCE_BRANCH=${2:-dev}
 SOURCE_REPO="https://github.com/QuantX-Club/quant-web.git"
 IMG_NAME="quant-web"
-IMG_VERSION="0.3.0"
+IMG_VERSION="0.3.1"
 BUILDER_NAME="mybuilder"
 BUILD_SUCCESS=0
 

@@ -1,3 +1,9 @@
+## v0.3.1 (2026-05-09)
+
+### Fix
+
+- **build**: enforce clean branch clone and valid lock versions
+
 ## v0.3.0 (2026-05-09)
 
 ### Feat
