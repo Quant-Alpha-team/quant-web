@@ -1,3 +1,9 @@
+## v0.3.0 (2026-05-09)
+
+### Feat
+
+- align trading API routes and add month-to-date preset
+
 ## v0.2.6 (2026-05-01)
 
 ### Fix
