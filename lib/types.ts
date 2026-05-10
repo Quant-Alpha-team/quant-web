@@ -3,6 +3,7 @@ export type DatePreset =
   | "Last 7 Days"
   | "Last 14 Days"
   | "Last 30 Days"
+  | "Month to Date"
   | "All Time"
   | "Custom Date";
 

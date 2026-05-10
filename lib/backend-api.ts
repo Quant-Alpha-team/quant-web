@@ -190,7 +190,7 @@ export async function pingBackend() {
 
 export async function getFilters(): Promise<FilterOptions> {
   const payload = await requestJson<Partial<FilterOptions>>(
-    "/api/strategy/meta/filters/",
+    "/api/trading/meta/filters/",
   );
   const data = payload.data;
   const strategies = data?.strategies;
@@ -209,7 +209,7 @@ export async function getTradeExecutions(params: {
   timezone: string;
 }) {
   return fetchAllPages<TradeExecution>(
-    "/api/strategy/trades/executions/",
+    "/api/trading/trades/executions/",
     {
       ...scopeParams(
         params.strategy,
@@ -231,7 +231,7 @@ export async function getAccountEquityHistory(params: {
   timezone: string;
 }) {
   return fetchAllPages<AccountEquity>(
-    "/api/strategy/accounts/equity-history/",
+    "/api/trading/accounts/equity-history/",
     {
       ...scopeParams(
         "ALL",
@@ -254,7 +254,7 @@ export async function getStrategyDailyPnl(params: {
   timezone: string;
 }) {
   return fetchAllPages<StrategyDailyPnl>(
-    "/api/strategy/strategies/daily-pnl/",
+    "/api/trading/strategies/daily-pnl/",
     {
       ...scopeParams(
         params.strategy,
