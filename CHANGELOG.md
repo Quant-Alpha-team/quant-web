@@ -1,3 +1,10 @@
+## v0.4.1 (2026-06-13)
+
+### Fix
+
+- **web**: fix the wrong semver version
+- **web**: update build.sh
+
 ## v0.4.0 (2026-06-13)
 
 ### Feat
