@@ -1,3 +1,9 @@
+## v0.4.2 (2026-06-13)
+
+### Fix
+
+- **web**: fix the wrong Dockerfile settings
+
 ## v0.4.1 (2026-06-13)
 
 ### Fix
