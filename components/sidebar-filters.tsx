@@ -40,10 +40,10 @@ function Field({
 }
 
 const inputClass =
-  "h-10 w-full rounded-md bg-white/[0.09] px-3 text-sm text-[var(--foreground)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_10px_24px_rgba(0,5,18,0.12)] backdrop-blur transition hover:bg-white/[0.13]";
+  "h-11 w-full rounded-md border border-white/[0.08] bg-white/[0.08] px-3 text-sm text-[var(--foreground)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_10px_24px_rgba(0,5,18,0.1)] backdrop-blur transition hover:border-white/[0.14] hover:bg-white/[0.12]";
 
 const toggleButtonClass =
-  "grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-md bg-[linear-gradient(135deg,rgba(94,234,212,0.9),rgba(56,189,248,0.86),rgba(192,132,252,0.82))] text-[#061322] shadow-[0_12px_24px_rgba(45,212,191,0.2)] transition hover:-translate-y-px hover:brightness-105";
+  "grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-md border border-white/[0.1] bg-white/[0.08] text-[var(--muted-strong)] shadow-[0_10px_22px_rgba(0,5,18,0.16)] transition hover:-translate-y-px hover:bg-white/[0.13] hover:text-[var(--foreground)]";
 
 export function SidebarFilters({
   collapsed,
@@ -105,17 +105,20 @@ export function SidebarFilters({
 
   return (
     <aside
-      className="w-full bg-[linear-gradient(180deg,rgba(10,38,61,0.58)_0%,rgba(21,37,80,0.4)_52%,rgba(6,19,34,0.22)_100%)] p-6 shadow-[18px_0_46px_rgba(0,5,18,0.24)] backdrop-blur-2xl transition-[width,padding] duration-200 lg:min-h-screen lg:w-80"
+      className="w-full bg-[linear-gradient(180deg,rgba(10,38,61,0.62)_0%,rgba(21,37,80,0.42)_52%,rgba(6,19,34,0.24)_100%)] p-5 shadow-[18px_0_46px_rgba(0,5,18,0.24)] backdrop-blur-2xl transition-[width,padding] duration-200 lg:min-h-screen lg:w-[340px]"
     >
-      <div className="mb-8 rounded-xl bg-white/[0.04] p-4 shadow-[0_16px_36px_rgba(0,5,18,0.2)]">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-3 pr-2">
-            <div className="grid h-10 w-10 place-items-center rounded-md bg-[linear-gradient(135deg,#5eead4,#38bdf8_48%,#c084fc)] font-mono text-sm font-bold text-[#061322] shadow-[0_16px_30px_rgba(45,212,191,0.22)]">
+      <div className="mb-7 border-b border-white/[0.08] pb-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-md bg-[linear-gradient(135deg,#5eead4,#38bdf8_48%,#c084fc)] font-mono text-base font-bold text-[#061322] shadow-[0_16px_30px_rgba(45,212,191,0.22)]">
               QA
             </div>
-            <div>
-              <div className="text-[1.95rem] leading-none font-semibold text-[var(--foreground)]">
+            <div className="min-w-0">
+              <div className="whitespace-nowrap text-[1.55rem] font-semibold leading-none text-[var(--foreground)]">
                 Quant Alpha
+              </div>
+              <div className="mt-1 font-mono text-[10px] uppercase tracking-normal text-[var(--muted)]">
+                Trading Platform
               </div>
             </div>
           </div>
@@ -126,24 +129,24 @@ export function SidebarFilters({
             onClick={onToggleCollapsed}
             className={toggleButtonClass}
           >
-            <SignalIcon
-              icon={ToggleIcon}
-              tone="violet"
-              className="h-7 w-7"
-              iconClassName="h-3.5 w-3.5"
-            />
+            <ToggleIcon className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
-        <div className="mt-4 space-y-2">
-          <div className="flex items-center justify-between rounded-md bg-white/[0.08] px-3 py-2 font-mono text-xs text-[var(--muted-strong)] backdrop-blur">
-            <span>{range.startDate} / {range.endDate}</span>
-            <span className="status-dot" aria-hidden="true" />
+        <div className="mt-5 grid gap-2">
+          <div className="rounded-md border border-white/[0.08] bg-white/[0.06] px-3 py-2.5 shadow-[0_10px_24px_rgba(0,5,18,0.12)]">
+            <div className="mb-1 text-[10px] uppercase tracking-normal text-[var(--muted)]">
+              Date Window
+            </div>
+            <div className="flex items-center justify-between gap-3 font-mono text-xs text-[var(--muted-strong)]">
+              <span className="truncate">{range.startDate} / {range.endDate}</span>
+              <span className="status-dot shrink-0" aria-hidden="true" />
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-2 font-mono text-[10px] uppercase tracking-normal text-[var(--muted)]">
-            <span className="rounded-md bg-white/[0.07] px-2 py-1">
+          <div className="grid grid-cols-[1fr_auto] gap-2 font-mono text-[10px] uppercase tracking-normal">
+            <span className="rounded-md border border-white/[0.08] bg-white/[0.05] px-3 py-2 text-[var(--muted)]">
               API LINK
             </span>
-            <span className="rounded-md bg-[rgba(156,246,47,0.12)] px-2 py-1 text-[#b8ff5d]">
+            <span className="rounded-md border border-[#9cf62f]/20 bg-[rgba(156,246,47,0.12)] px-3 py-2 text-[#b8ff5d]">
               Online
             </span>
           </div>
