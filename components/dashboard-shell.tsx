@@ -638,7 +638,7 @@ export function DashboardShell() {
                   {activeSectionLabel}
                 </div>
                 <h1 className="mt-2 text-3xl font-semibold text-[var(--foreground)] md:text-4xl">
-                  QuantX Dashboard
+                  Quant Alpha Dashboard
                 </h1>
               </div>
               <div className="flex flex-wrap gap-3 text-xs text-[var(--muted)]">

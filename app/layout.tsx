@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "QuantX Dashboard",
-  description: "QuantX web dashboard for strategy monitoring",
+  title: "Quant Alpha Dashboard",
+  description: "Quant Alpha web dashboard for strategy monitoring",
 };
 
 export default function RootLayout({

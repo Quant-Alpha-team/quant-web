@@ -1,6 +1,6 @@
-# QuantX Dashboard
+# Quant Alpha Dashboard
 
-**QuantX Dashboard** is a Next.js-based monitoring UI for the QuantX
+**Quant Alpha Dashboard** is a Next.js-based monitoring UI for the Quant Alpha
 ecosystem, focused on strategy performance, account equity tracking, and
 trade-log diagnostics.
 

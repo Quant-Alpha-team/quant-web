@@ -111,11 +111,11 @@ export function SidebarFilters({
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3 pr-2">
             <div className="grid h-10 w-10 place-items-center rounded-md bg-[linear-gradient(135deg,#5eead4,#38bdf8_48%,#c084fc)] font-mono text-sm font-bold text-[#061322] shadow-[0_16px_30px_rgba(45,212,191,0.22)]">
-              QX
+              QA
             </div>
             <div>
               <div className="text-[1.95rem] leading-none font-semibold text-[var(--foreground)]">
-                QuantX
+                Quant Alpha
               </div>
             </div>
           </div>

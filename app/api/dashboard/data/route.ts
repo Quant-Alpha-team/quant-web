@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     };
 
     logInfo("Dashboard session started", {
-      page: "QuantX Performance Dashboard",
+      page: "Quant Alpha Performance Dashboard",
       layout: "wide",
     });
     logInfo("Filters applied", {
