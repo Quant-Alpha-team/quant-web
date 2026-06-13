@@ -1,3 +1,9 @@
+## v0.4.0 (2026-06-13)
+
+### Feat
+
+- **web**: rename Quant X as Quant Alpha
+
 ## v0.3.1 (2026-05-09)
 
 ### Fix
