@@ -4,6 +4,12 @@
 FROM node:22-alpine AS deps
 
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NPM_CONFIG_AUDIT=false
+ENV NPM_CONFIG_FUND=false
+ENV NPM_CONFIG_FETCH_RETRIES=5
+ENV NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000
+ENV NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000
+ENV NPM_CONFIG_FETCH_TIMEOUT=600000
 
 WORKDIR /app
 
@@ -12,7 +18,8 @@ RUN apk add --no-cache libc6-compat
 
 # Copy metadata first to maximize Docker layer cache reuse
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,id=quant-web-npm,target=/root/.npm \
+  npm ci --prefer-offline
 
 # ==========================================
 # Stage 2: Builder (Standalone Output)
