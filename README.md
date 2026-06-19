@@ -80,6 +80,8 @@ Common settings:
 - `API_AUTH_DISABLED`: skip token auth for local test backends (`true`
   disables the Authorization header)
 - `API_TIMEOUT_SECONDS`: backend request timeout in seconds
+- `API_SYNC_TIMEOUT_SECONDS`: trading data synchronization timeout in seconds
+  (`180` by default)
 - `API_PAGE_SIZE`: backend list API pagination page size
 - `API_MAX_EXEC_ROWS` / `API_MAX_PERF_ROWS` / `API_MAX_PNL_ROWS`: per-dataset
   fetch caps (set `0` to disable a cap)

@@ -18,6 +18,13 @@ type ApiEnvelope<T> = {
   };
 };
 
+type RequestJsonOptions = {
+  method?: "GET" | "POST";
+  queryParams?: Record<string, string | number>;
+  requireAuth?: boolean;
+  timeoutSeconds?: number;
+};
+
 export class BackendApiError extends Error {
   constructor(message: string) {
     super(message);
@@ -56,7 +63,8 @@ const apiConfig = {
   ).replace(/\/+$/, ""),
   token: (process.env.API_TOKEN || "").trim().replace(/^token\s+/i, ""),
   authDisabled: boolEnv("API_AUTH_DISABLED", false),
-  timeoutSeconds: Number(process.env.API_TIMEOUT_SECONDS || "15"),
+  timeoutSeconds: intEnv("API_TIMEOUT_SECONDS", 15),
+  syncTimeoutSeconds: intEnv("API_SYNC_TIMEOUT_SECONDS", 180),
   pageSize: intEnv("API_PAGE_SIZE", 500, 2000),
   maxExecRows: optionalRowCap("API_MAX_EXEC_ROWS", 5000),
   maxPerfRows: optionalRowCap("API_MAX_PERF_ROWS", 5000),
@@ -65,9 +73,9 @@ const apiConfig = {
 
 async function requestJson<T>(
   path: string,
-  queryParams?: Record<string, string | number>,
-  requireAuth = true,
+  options: RequestJsonOptions = {},
 ) {
+  const requireAuth = options.requireAuth ?? true;
   if (requireAuth && !apiConfig.authDisabled && !apiConfig.token) {
     throw new BackendApiError(
       "Missing API token. Set API_TOKEN or API_AUTH_DISABLED=true.",
@@ -75,7 +83,7 @@ async function requestJson<T>(
   }
 
   const url = new URL(`${apiConfig.baseUrl}${path}`);
-  for (const [key, value] of Object.entries(queryParams ?? {})) {
+  for (const [key, value] of Object.entries(options.queryParams ?? {})) {
     url.searchParams.set(key, String(value));
   }
 
@@ -89,7 +97,7 @@ async function requestJson<T>(
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
-    apiConfig.timeoutSeconds * 1000,
+    (options.timeoutSeconds ?? apiConfig.timeoutSeconds) * 1000,
   );
 
   let response: Response;
@@ -97,6 +105,7 @@ async function requestJson<T>(
     response = await fetch(url, {
       cache: "no-store",
       headers,
+      method: options.method ?? "GET",
       signal: controller.signal,
     });
   } catch (error) {
@@ -137,9 +146,11 @@ async function fetchAllPages<T>(
 
   for (let page = 0; page < 10000; page += 1) {
     const payload = await requestJson<T[]>(path, {
-      ...baseParams,
-      limit: apiConfig.pageSize,
-      offset,
+      queryParams: {
+        ...baseParams,
+        limit: apiConfig.pageSize,
+        offset,
+      },
     });
     const pageRows = payload.data ?? [];
     if (!Array.isArray(pageRows)) {
@@ -185,7 +196,7 @@ function scopeParams(
 }
 
 export async function pingBackend() {
-  await requestJson("/api/health/", undefined, false);
+  await requestJson("/api/health/", { requireAuth: false });
 }
 
 export async function getFilters(): Promise<FilterOptions> {
@@ -199,6 +210,26 @@ export async function getFilters(): Promise<FilterOptions> {
     throw new BackendApiError("Unexpected response format from filters API.");
   }
   return { strategies, accounts };
+}
+
+export type ReconciliationSyncResult = {
+  status: "completed";
+  completed_at: string;
+  elapsed_seconds: number;
+};
+
+export async function syncTradingData(): Promise<ReconciliationSyncResult> {
+  const payload = await requestJson<ReconciliationSyncResult>(
+    "/api/trading/reconciliation/sync/",
+    {
+      method: "POST",
+      timeoutSeconds: apiConfig.syncTimeoutSeconds,
+    },
+  );
+  if (!payload.data) {
+    throw new BackendApiError("Unexpected response format from sync API.");
+  }
+  return payload.data;
 }
 
 export async function getTradeExecutions(params: {

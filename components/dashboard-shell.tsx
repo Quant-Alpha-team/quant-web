@@ -486,8 +486,10 @@ export function DashboardShell() {
   const [section, setSection] = useState<SectionId>("overview");
   const [data, setData] = useState<DashboardData>(emptyData);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [filterError, setFilterError] = useState<string | null>(null);
   const [dataError, setDataError] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -562,6 +564,24 @@ export function DashboardShell() {
 
     return () => controller.abort();
   }, [accountId, range.endDate, range.startDate, refreshKey, section, strategy, timezone]);
+
+  async function handleRefresh() {
+    setSyncing(true);
+    setSyncError(null);
+
+    try {
+      const response = await fetch("/api/dashboard/sync", {
+        method: "POST",
+        cache: "no-store",
+      });
+      await readApi(response);
+      setRefreshKey((value) => value + 1);
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   const currentPanel = (() => {
     if (section === "overview") {
@@ -659,21 +679,23 @@ export function DashboardShell() {
             <div className="flex w-full flex-col gap-2 xl:w-auto xl:items-end">
               <button
                 type="button"
-                title="Refresh"
-                disabled={loading}
-                onClick={() => setRefreshKey((value) => value + 1)}
+                title={syncing ? "Synchronizing trading data" : "Refresh"}
+                disabled={loading || syncing}
+                onClick={handleRefresh}
                 className={`${primaryButtonClass} w-full xl:w-auto`}
               >
                 <SignalIcon
                   icon={RefreshCw}
                   tone="mint"
                   className="h-6 w-6"
-                  iconClassName={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
+                  iconClassName={`h-3.5 w-3.5 ${loading || syncing ? "animate-spin" : ""}`}
                 />
-                Refresh
+                {syncing ? "Syncing..." : "Refresh"}
               </button>
               <div className="rounded-md bg-white/[0.05] px-3 py-1.5 text-center font-mono text-[11px] uppercase tracking-normal text-[var(--muted)] xl:text-right">
-                {loading
+                {syncing
+                  ? "Syncing with IBKR..."
+                  : loading
                   ? "Updating..."
                   : `Last update: ${formatTimestamp(lastUpdatedAt ?? undefined, timezone)}`}
               </div>
@@ -695,7 +717,14 @@ export function DashboardShell() {
               Dashboard API unavailable: {dataError}
             </StatusMessage>
           ) : null}
-          {loading ? (
+          {syncError ? (
+            <StatusMessage tone="error">
+              Trading data sync failed: {syncError}
+            </StatusMessage>
+          ) : null}
+          {syncing ? (
+            <StatusMessage tone="loading">Synchronizing trades with IBKR...</StatusMessage>
+          ) : loading ? (
             <StatusMessage tone="loading">Loading dashboard data...</StatusMessage>
           ) : null}
           {currentPanel}
