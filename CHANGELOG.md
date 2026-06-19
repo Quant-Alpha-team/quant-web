@@ -1,3 +1,9 @@
+## v0.5.0 (2026-06-19)
+
+### Feat
+
+- **web**: update new logo and icon
+
 ## v0.4.4 (2026-06-19)
 
 ### Fix
