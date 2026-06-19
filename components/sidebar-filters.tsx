@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import {
   CalendarDays,
   Clock3,
@@ -110,8 +111,15 @@ export function SidebarFilters({
       <div className="mb-7 border-b border-white/[0.08] pb-6">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-md bg-[linear-gradient(135deg,#5eead4,#38bdf8_48%,#c084fc)] font-mono text-base font-bold text-[#061322] shadow-[0_16px_30px_rgba(45,212,191,0.22)]">
-              QA
+            <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-md shadow-[0_16px_30px_rgba(45,212,191,0.22)]">
+              <Image
+                src="/QuantAlpha-logo.png"
+                alt="Quant Alpha logo"
+                width={48}
+                height={48}
+                className="h-12 w-12 object-contain"
+                priority
+              />
             </div>
             <div className="min-w-0">
               <div className="whitespace-nowrap text-[1.55rem] font-semibold leading-none text-[var(--foreground)]">
