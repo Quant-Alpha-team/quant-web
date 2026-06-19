@@ -1,3 +1,10 @@
+## v0.4.4 (2026-06-19)
+
+### Fix
+
+- **sync**: recover the wrong equity while using ALL Equity part
+- **web**: fix the Refresh does not work about new data
+
 ## v0.4.3 (2026-06-13)
 
 ### Fix
