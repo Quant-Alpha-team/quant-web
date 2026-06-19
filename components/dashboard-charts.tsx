@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import {
   CHART_COLORS,
+  aggregateEquityHistory,
   downsample,
   formatCurrency,
   formatDate,
@@ -79,7 +80,7 @@ export function EquityChart({
   rows: AccountEquity[];
   timezone: string;
 }) {
-  const data = downsample(rows, 3000).map((row) => ({
+  const data = downsample(aggregateEquityHistory(rows), 3000).map((row) => ({
     label: row.timestamp
       ? formatTimestamp(row.timestamp, timezone)
       : formatDate(row.date),

@@ -130,6 +130,92 @@ function timeValue(value: string | undefined) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function equityAccountKey(row: AccountEquity) {
+  return row.broker_account_id?.trim() || "__unknown_account__";
+}
+
+function sortEquityOldestFirst(rows: AccountEquity[]) {
+  return [...rows].sort(
+    (a, b) =>
+      timeValue(a.timestamp ?? a.date) - timeValue(b.timestamp ?? b.date),
+  );
+}
+
+/**
+ * Build one portfolio-level equity series when the API returns multiple
+ * accounts. Each point carries forward the latest known value for every
+ * account, so snapshots recorded at slightly different times do not get
+ * connected as if they belonged to one account.
+ */
+export function aggregateEquityHistory(rows: AccountEquity[]) {
+  const sorted = sortEquityOldestFirst(rows);
+  const accounts = new Set(sorted.map(equityAccountKey));
+
+  if (accounts.size <= 1) {
+    return sorted;
+  }
+
+  const latestByAccount = new Map<string, number>();
+  const combined: AccountEquity[] = [];
+  let index = 0;
+
+  while (index < sorted.length) {
+    const pointTime = timeValue(sorted[index].timestamp ?? sorted[index].date);
+    let point = sorted[index];
+
+    do {
+      point = sorted[index];
+      latestByAccount.set(
+        equityAccountKey(point),
+        toNumber(point.equity_value),
+      );
+      index += 1;
+    } while (
+      index < sorted.length &&
+      timeValue(sorted[index].timestamp ?? sorted[index].date) === pointTime
+    );
+
+    combined.push({
+      date: point.date,
+      timestamp: point.timestamp,
+      broker_account_id: "ALL",
+      equity_value: [...latestByAccount.values()].reduce(
+        (total, value) => total + value,
+        0,
+      ),
+    });
+  }
+
+  return combined;
+}
+
+function currentAndPreviousEquity(rows: AccountEquity[]) {
+  const byAccount = new Map<string, AccountEquity[]>();
+
+  for (const row of rows) {
+    const account = equityAccountKey(row);
+    const accountRows = byAccount.get(account) ?? [];
+    accountRows.push(row);
+    byAccount.set(account, accountRows);
+  }
+
+  let current = 0;
+  let previous = 0;
+
+  for (const accountRows of byAccount.values()) {
+    const sorted = sortEquityOldestFirst(accountRows);
+    const latestValue = toNumber(sorted.at(-1)?.equity_value);
+    const previousValue =
+      sorted.length > 1
+        ? toNumber(sorted.at(-2)?.equity_value)
+        : latestValue;
+    current += latestValue;
+    previous += previousValue;
+  }
+
+  return { current, previous };
+}
+
 export function computeKpis(
   perfRows: AccountEquity[],
   execRows: TradeExecution[],
@@ -144,16 +230,9 @@ export function computeKpis(
   };
 
   if (perfRows.length > 0) {
-    const sorted = [...perfRows].sort(
-      (a, b) =>
-        timeValue(a.timestamp ?? a.date) - timeValue(b.timestamp ?? b.date),
-    );
-    const current = sorted.at(-1);
-    const previous = sorted.length > 1 ? sorted.at(-2) : undefined;
-    kpi.currentEquity = toNumber(current?.equity_value);
-    kpi.equityChange = previous
-      ? kpi.currentEquity - toNumber(previous.equity_value)
-      : 0;
+    const equity = currentAndPreviousEquity(perfRows);
+    kpi.currentEquity = equity.current;
+    kpi.equityChange = equity.current - equity.previous;
   }
 
   kpi.totalPnl = pnlRows.reduce(
