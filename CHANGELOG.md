@@ -1,3 +1,9 @@
+## v0.5.1 (2026-06-21)
+
+### Fix
+
+- **web**: replace quantX to Quant Aplha
+
 ## v0.5.0 (2026-06-19)
 
 ### Feat
