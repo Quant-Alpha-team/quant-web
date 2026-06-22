@@ -19,7 +19,7 @@ const levelWeights: Record<LogLevel, number> = {
   ERROR: 40,
 };
 
-const defaultLogDir = "log";
+const defaultLogDir = "logs";
 const defaultLogFile = "dashboard.log";
 const defaultTimeZone = "America/New_York";
 const defaultLevel: LogLevel = "INFO";

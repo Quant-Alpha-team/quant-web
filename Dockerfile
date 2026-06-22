@@ -54,8 +54,8 @@ WORKDIR /app
 RUN apk add --no-cache libc6-compat \
   && addgroup -S nodejs \
   && adduser -S nextjs -G nodejs \
-  && mkdir -p /app/log \
-  && chown -R nextjs:nodejs /app/log
+  && mkdir -p /app/logs \
+  && chown -R nextjs:nodejs /app/logs
 
 # [OPTIMIZATION] Copy only traced standalone output instead of full node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./

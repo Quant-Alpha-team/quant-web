@@ -15,7 +15,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const defaultLogDir = "log";
+const defaultLogDir = "logs";
 const defaultLogFile = "dashboard.log";
 const defaultTimeZone = "America/New_York";
 const defaultLogLevel = "INFO";
