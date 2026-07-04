@@ -5,8 +5,8 @@ set -euo pipefail
 
 IMAGE_NAME="quant-web"
 BUILDER_NAME="web-builder"
-REGISTRY_GL="${REGISTRY_GL:-registry.gitlab.com/quantx-club/registry}"
 REGISTRY_GH="${REGISTRY_GH:-ghcr.io/quant-alpha-team/registry}"
+REGISTRY_GL="${REGISTRY_GL:-registry.gitlab.com/quant-alpha-team/registry}"
 
 MODE="local"
 MODE_SET=""
