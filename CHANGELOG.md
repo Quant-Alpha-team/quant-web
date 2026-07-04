@@ -1,3 +1,9 @@
+## v0.5.3 (2026-07-04)
+
+### Refactor
+
+- update gitlab's registry link
+
 ## v0.5.2 (2026-06-22)
 
 ### Fix
