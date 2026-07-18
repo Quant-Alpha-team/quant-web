@@ -1,3 +1,13 @@
+## v0.6.0 (2026-07-18)
+
+### Feat
+
+- **dashboard**: add strategy-aware portfolio, positions, and P&L views
+
+### Refactor
+
+- **dashboard**: remove unused dashboard code
+
 ## v0.5.3 (2026-07-04)
 
 ### Refactor
