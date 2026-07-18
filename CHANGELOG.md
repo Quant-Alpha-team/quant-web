@@ -1,3 +1,9 @@
+## v0.6.1 (2026-07-18)
+
+### Fix
+
+- recover build image problem
+
 ## v0.6.0 (2026-07-18)
 
 ### Feat
