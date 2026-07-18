@@ -8,6 +8,7 @@ export type TableColumn<T> = {
   label: string;
   render: (row: T) => React.ReactNode;
   align?: "left" | "right";
+  width?: string;
 };
 
 type PaginationConfig = {
@@ -48,12 +49,18 @@ export function DataTable<T>({
   return (
     <div className="space-y-3">
       <div className="overflow-x-auto rounded-md bg-white/[0.07] shadow-[0_18px_42px_var(--shadow)] backdrop-blur-xl">
-        <table className="min-w-full border-collapse text-sm">
+        <table
+          className={
+            "min-w-full border-collapse text-sm " +
+            (columns.some((column) => column.width) ? "table-fixed" : "")
+          }
+        >
           <thead className="bg-white/[0.08] text-left text-xs uppercase tracking-normal text-[var(--muted)]">
             <tr>
               {columns.map((column) => (
                 <th
                   key={column.key}
+                  style={column.width ? { width: column.width } : undefined}
                   className={`whitespace-nowrap px-4 py-3 font-medium ${
                     column.align === "right" ? "text-right" : "text-left"
                   }`}

@@ -2,6 +2,7 @@ import {
   BackendApiError,
   getAccountEquityHistory,
   getStrategyDailyPnl,
+  getStrategyPositions,
   getTradeExecutions,
 } from "@/lib/backend-api";
 import { logError, logInfo } from "@/lib/logger";
@@ -14,6 +15,7 @@ const sectionLabels: Record<SectionId, string> = {
   overview: "\u{1F4C8} Overview",
   "strategy-pnl": "\u{1F4CA} Strategy P&L",
   "account-equity": "\u{1F3E6} Account Equity",
+  positions: "\u{1F4BC} Positions",
   "trade-logs": "\u{1F4DD} Trade Logs",
   diagnostics: "Diagnostics",
 };
@@ -47,6 +49,7 @@ export async function POST(request: Request) {
       includeExec: boolValue(body.includeExec),
       includePerf: boolValue(body.includePerf),
       includePnl: boolValue(body.includePnl),
+      includePositions: boolValue(body.includePositions),
     };
 
     logInfo("Dashboard session started", {
@@ -61,18 +64,20 @@ export async function POST(request: Request) {
       tz: query.timezone,
     });
 
-    const [execRows, perfRows, pnlRows] = await Promise.all([
+    const [execRows, perfRows, pnlRows, positionRows] = await Promise.all([
       query.includeExec ? getTradeExecutions(query) : Promise.resolve([]),
       query.includePerf ? getAccountEquityHistory(query) : Promise.resolve([]),
       query.includePnl ? getStrategyDailyPnl(query) : Promise.resolve([]),
+      query.includePositions ? getStrategyPositions(query) : Promise.resolve([]),
     ]);
 
-    const data: DashboardData = { execRows, perfRows, pnlRows };
+    const data: DashboardData = { execRows, perfRows, pnlRows, positionRows };
     logInfo("Data loaded", {
       section: sectionLabels[query.section],
       exec_rows: execRows.length,
       equity_rows: perfRows.length,
       pnl_rows: pnlRows.length,
+      position_rows: positionRows.length,
     });
     return Response.json({ ok: true, data });
   } catch (error) {
@@ -85,7 +90,7 @@ export async function POST(request: Request) {
       {
         ok: false,
         error: { message },
-        data: { execRows: [], perfRows: [], pnlRows: [] },
+        data: { execRows: [], perfRows: [], pnlRows: [], positionRows: [] },
       },
       { status: 503 },
     );

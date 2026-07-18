@@ -85,19 +85,19 @@ export function SidebarFilters({
 
   if (collapsed) {
     return (
-      <aside className="w-full bg-[linear-gradient(180deg,rgba(10,38,61,0.58)_0%,rgba(21,37,80,0.4)_52%,rgba(6,19,34,0.22)_100%)] p-3 shadow-[18px_0_46px_rgba(0,5,18,0.24)] backdrop-blur-2xl lg:min-h-screen lg:w-[72px]">
+      <aside className="absolute right-4 top-4 z-50 rounded-md bg-[linear-gradient(180deg,rgba(10,38,61,0.78)_0%,rgba(21,37,80,0.68)_100%)] p-1.5 shadow-[0_12px_30px_rgba(0,5,18,0.3)] backdrop-blur-2xl lg:static lg:min-h-screen lg:w-[72px] lg:rounded-none lg:bg-[linear-gradient(180deg,rgba(10,38,61,0.58)_0%,rgba(21,37,80,0.4)_52%,rgba(6,19,34,0.22)_100%)] lg:p-3 lg:shadow-[18px_0_46px_rgba(0,5,18,0.24)]">
         <button
           type="button"
           title="Expand sidebar"
           aria-label="Expand sidebar"
           onClick={onToggleCollapsed}
-          className={`${toggleButtonClass} mx-auto mt-2 h-11 w-11`}
+          className={`${toggleButtonClass} h-10 w-10 lg:mx-auto lg:mt-2 lg:h-11 lg:w-11`}
         >
           <SignalIcon
             icon={ToggleIcon}
             tone="cyan"
             className="h-8 w-8"
-            iconClassName="h-4 w-4"
+            iconClassName={`h-4 w-4 transition-transform ${collapsed ? "rotate-180 lg:rotate-0" : ""}`}
           />
         </button>
       </aside>

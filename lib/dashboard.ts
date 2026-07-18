@@ -5,6 +5,7 @@ import type {
   KpiCards,
   SectionId,
   StrategyDailyPnl,
+  StrategyPosition,
   TradeExecution,
 } from "@/lib/types";
 
@@ -23,6 +24,7 @@ export const DATE_PRESETS: DatePreset[] = [
 export const SECTIONS: { id: SectionId; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "strategy-pnl", label: "Strategy P&L" },
+  { id: "positions", label: "Positions" },
   { id: "account-equity", label: "Account Equity" },
   { id: "trade-logs", label: "Trade Logs" },
   { id: "diagnostics", label: "Diagnostics" },
@@ -83,11 +85,11 @@ export function resolveDateRange(
   let endDate = today;
 
   if (preset === "Last 7 Days") {
-    startDate = addDays(today, -7);
+    startDate = addDays(today, -6);
   } else if (preset === "Last 14 Days") {
-    startDate = addDays(today, -14);
+    startDate = addDays(today, -13);
   } else if (preset === "Last 30 Days") {
-    startDate = addDays(today, -30);
+    startDate = addDays(today, -29);
   } else if (preset === "Month to Date") {
     startDate = `${today.slice(0, 8)}01`;
   } else if (preset === "All Time") {
@@ -108,6 +110,7 @@ export function includesForSection(section: SectionId) {
     includeExec: ["overview", "trade-logs", "diagnostics"].includes(section),
     includePerf: ["overview", "account-equity", "diagnostics"].includes(section),
     includePnl: ["overview", "strategy-pnl", "diagnostics"].includes(section),
+    includePositions: ["overview", "positions", "diagnostics"].includes(section),
   };
 }
 
@@ -134,53 +137,102 @@ function equityAccountKey(row: AccountEquity) {
   return row.broker_account_id?.trim() || "__unknown_account__";
 }
 
-function sortEquityOldestFirst(rows: AccountEquity[]) {
-  return [...rows].sort(
-    (a, b) =>
-      timeValue(a.timestamp ?? a.date) - timeValue(b.timestamp ?? b.date),
-  );
+function equityDateKey(row: AccountEquity) {
+  return row.date?.trim() || row.timestamp?.slice(0, 10) || "";
+}
+
+function optionalNumber(value: unknown) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function newestValue(values: Array<string | undefined>) {
+  let newest: string | undefined;
+  for (const value of values) {
+    if (value && (!newest || timeValue(value) > timeValue(newest))) {
+      newest = value;
+    }
+  }
+  return newest;
+}
+
+function sumComplete<T>(rows: T[], readValue: (row: T) => unknown) {
+  if (rows.length === 0) {
+    return null;
+  }
+
+  let total = 0;
+  for (const row of rows) {
+    const value = optionalNumber(readValue(row));
+    if (value === null) {
+      return null;
+    }
+    total += value;
+  }
+  return total;
 }
 
 /**
- * Build one portfolio-level equity series when the API returns multiple
- * accounts. Each point carries forward the latest known value for every
- * account, so snapshots recorded at slightly different times do not get
- * connected as if they belonged to one account.
+ * Return one closing NAV point per account and trading date. If multiple
+ * accounts are selected, carry each account's last known close forward and do
+ * not emit a portfolio total until every account has appeared at least once.
  */
 export function aggregateEquityHistory(rows: AccountEquity[]) {
-  const sorted = sortEquityOldestFirst(rows);
-  const accounts = new Set(sorted.map(equityAccountKey));
+  const latestByAccountDate = new Map<string, AccountEquity>();
 
-  if (accounts.size <= 1) {
-    return sorted;
+  for (const row of rows) {
+    const date = equityDateKey(row);
+    if (!date) {
+      continue;
+    }
+    const key = `${equityAccountKey(row)}|${date}`;
+    const current = latestByAccountDate.get(key);
+    if (
+      !current ||
+      timeValue(row.timestamp ?? row.date) >=
+        timeValue(current.timestamp ?? current.date)
+    ) {
+      latestByAccountDate.set(key, row);
+    }
   }
 
-  const latestByAccount = new Map<string, number>();
+  const dailyRows = [...latestByAccountDate.values()];
+  const accounts = new Set(dailyRows.map(equityAccountKey));
+  const rowsByDate = new Map<string, AccountEquity[]>();
+  for (const row of dailyRows) {
+    const date = equityDateKey(row);
+    const dateRows = rowsByDate.get(date) ?? [];
+    dateRows.push(row);
+    rowsByDate.set(date, dateRows);
+  }
+
+  const latestByAccount = new Map<string, AccountEquity>();
   const combined: AccountEquity[] = [];
-  let index = 0;
 
-  while (index < sorted.length) {
-    const pointTime = timeValue(sorted[index].timestamp ?? sorted[index].date);
-    let point = sorted[index];
+  for (const date of [...rowsByDate.keys()].sort()) {
+    for (const row of rowsByDate.get(date) ?? []) {
+      latestByAccount.set(equityAccountKey(row), row);
+    }
+    if (latestByAccount.size !== accounts.size) {
+      continue;
+    }
 
-    do {
-      point = sorted[index];
-      latestByAccount.set(
-        equityAccountKey(point),
-        toNumber(point.equity_value),
-      );
-      index += 1;
-    } while (
-      index < sorted.length &&
-      timeValue(sorted[index].timestamp ?? sorted[index].date) === pointTime
-    );
-
+    const currentRows = [...latestByAccount.values()];
     combined.push({
-      date: point.date,
-      timestamp: point.timestamp,
-      broker_account_id: "ALL",
-      equity_value: [...latestByAccount.values()].reduce(
-        (total, value) => total + value,
+      date,
+      timestamp: newestValue(currentRows.map((row) => row.timestamp ?? row.date)),
+      broker_account_id:
+        accounts.size === 1
+          ? currentRows[0]?.broker_account_id
+          : "ALL",
+      equity_value: currentRows.reduce(
+        (total, row) => total + toNumber(row.equity_value),
         0,
       ),
     });
@@ -189,61 +241,116 @@ export function aggregateEquityHistory(rows: AccountEquity[]) {
   return combined;
 }
 
-function currentAndPreviousEquity(rows: AccountEquity[]) {
-  const byAccount = new Map<string, AccountEquity[]>();
-
-  for (const row of rows) {
-    const account = equityAccountKey(row);
-    const accountRows = byAccount.get(account) ?? [];
-    accountRows.push(row);
-    byAccount.set(account, accountRows);
-  }
-
-  let current = 0;
-  let previous = 0;
-
-  for (const accountRows of byAccount.values()) {
-    const sorted = sortEquityOldestFirst(accountRows);
-    const latestValue = toNumber(sorted.at(-1)?.equity_value);
-    const previousValue =
-      sorted.length > 1
-        ? toNumber(sorted.at(-2)?.equity_value)
-        : latestValue;
-    current += latestValue;
-    previous += previousValue;
-  }
-
-  return { current, previous };
-}
-
 export function computeKpis(
   perfRows: AccountEquity[],
   execRows: TradeExecution[],
   pnlRows: StrategyDailyPnl[],
+  positionRows: StrategyPosition[],
+  asOfDate: string,
 ): KpiCards {
   const kpi: KpiCards = {
-    currentEquity: 0,
-    equityChange: 0,
-    totalPnl: 0,
-    openTrades: 0,
-    totalCommission: 0,
+    accountNav: null,
+    accountCount: 0,
+    navChange: null,
+    navChangePercent: null,
+    openPnl: null,
+    periodPnl: null,
+    totalCommission: execRows.reduce(
+      (total, row) => total + toNumber(row.commission),
+      0,
+    ),
+    periodPnlRecords: 0,
+    periodPnlPendingRecords: 0,
+    dayChange: null,
+    dayChangeSource: "UNAVAILABLE",
+    totalTrades: execRows.length,
+    openPositions: positionRows.length,
+    openStrategies: new Set(
+      positionRows.map(
+        (row) =>
+          `${row.strategy_name ?? "unknown"}|${row.broker_account_id ?? "unknown"}`,
+      ),
+    ).size,
+    pricedPositions: 0,
+    previousClosePositions: 0,
   };
 
-  if (perfRows.length > 0) {
-    const equity = currentAndPreviousEquity(perfRows);
-    kpi.currentEquity = equity.current;
-    kpi.equityChange = equity.current - equity.previous;
+  const latestEquityByAccount = new Map<string, AccountEquity>();
+  for (const row of perfRows) {
+    const account = equityAccountKey(row);
+    const current = latestEquityByAccount.get(account);
+    if (
+      !current ||
+      timeValue(row.timestamp ?? row.date) >
+        timeValue(current.timestamp ?? current.date)
+    ) {
+      latestEquityByAccount.set(account, row);
+    }
+  }
+  const latestEquityRows = [...latestEquityByAccount.values()];
+  if (latestEquityRows.length > 0) {
+    kpi.accountNav = latestEquityRows.reduce(
+      (total, row) => total + toNumber(row.equity_value),
+      0,
+    );
+    kpi.accountCount = latestEquityRows.length;
   }
 
-  kpi.totalPnl = pnlRows.reduce(
-    (total, row) => total + toNumber(row.daily_pnl),
-    0,
+  const equitySeries = aggregateEquityHistory(perfRows);
+  if (equitySeries.length > 1) {
+    const firstNav = toNumber(equitySeries[0].equity_value);
+    const lastNav = toNumber(equitySeries.at(-1)?.equity_value);
+    kpi.navChange = lastNav - firstNav;
+    kpi.navChangePercent =
+      firstNav !== 0 ? ((lastNav - firstNav) / firstNav) * 100 : null;
+  }
+
+  const recordedPnlRows = pnlRows.filter(
+    (row) => optionalNumber(row.daily_pnl) !== null,
   );
-  kpi.openTrades = execRows.filter((row) => row.status === "OPEN").length;
-  kpi.totalCommission = execRows.reduce(
-    (total, row) => total + toNumber(row.commission),
-    0,
+  kpi.periodPnlRecords = recordedPnlRows.length;
+  kpi.periodPnlPendingRecords = pnlRows.length - recordedPnlRows.length;
+  if (recordedPnlRows.length > 0) {
+    kpi.periodPnl = recordedPnlRows.reduce(
+      (total, row) => total + toNumber(row.daily_pnl),
+      0,
+    );
+  }
+
+  const pricedPositions = positionRows.filter(
+    (row) =>
+      optionalNumber(row.market_value) !== null &&
+      optionalNumber(row.unrealized_pnl) !== null,
   );
+  kpi.pricedPositions = pricedPositions.length;
+  kpi.previousClosePositions = positionRows.filter(
+    (row) => optionalNumber(row.day_change) !== null,
+  ).length;
+  if (positionRows.length === 0) {
+    kpi.openPnl = 0;
+  } else if (pricedPositions.length === positionRows.length) {
+    kpi.openPnl = pricedPositions.reduce(
+      (total, row) => total + toNumber(row.unrealized_pnl),
+      0,
+    );
+  }
+
+  const asOfPnlRows = pnlRows.filter((row) => row.date === asOfDate);
+  const strategyDailyPnl = sumComplete(asOfPnlRows, (row) => row.daily_pnl);
+  if (strategyDailyPnl !== null) {
+    kpi.dayChange = strategyDailyPnl;
+    kpi.dayChangeSource = "STRATEGY_DAILY_PNL";
+  } else if (
+    positionRows.length > 0 &&
+    kpi.previousClosePositions === positionRows.length
+  ) {
+    kpi.dayChange = positionRows.reduce(
+      (total, row) => total + toNumber(row.day_change),
+      0,
+    );
+    kpi.dayChangeSource = "OPEN_POSITIONS";
+  }
+
   return kpi;
 }
 
@@ -271,6 +378,9 @@ export function formatNumber(value: unknown, digits = 2) {
 export function formatDate(value: string | undefined) {
   if (!value) {
     return "-";
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
   }
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
@@ -319,12 +429,13 @@ export function downsample<T>(rows: T[], maxPoints: number) {
   return [...positions].sort((a, b) => a - b).map((index) => rows[index]);
 }
 
-export function sortByNewest<T extends { timestamp?: string; date?: string }>(
-  rows: T[],
-) {
+export function sortByNewest<
+  T extends { timestamp?: string; snapshot_at?: string; date?: string },
+>(rows: T[]) {
   return [...rows].sort(
     (a, b) =>
-      timeValue(b.timestamp ?? b.date) - timeValue(a.timestamp ?? a.date),
+      timeValue(b.timestamp ?? b.snapshot_at ?? b.date) -
+      timeValue(a.timestamp ?? a.snapshot_at ?? a.date),
   );
 }
 
@@ -361,6 +472,10 @@ export function pnlSummary(rows: StrategyDailyPnl[]) {
         winRate: total > 0 ? (entry.wins / total) * 100 : 0,
       };
     })
+    .filter(
+      (entry) =>
+        entry.wins + entry.losses > 0 || Math.abs(entry.pnl) >= 0.005,
+    )
     .sort((a, b) => b.pnl - a.pnl);
 }
 
@@ -377,5 +492,6 @@ export function recordCounts(data: DashboardData) {
     executions: data.execRows.length,
     equity: data.perfRows.length,
     pnl: data.pnlRows.length,
+    positions: data.positionRows.length,
   };
 }

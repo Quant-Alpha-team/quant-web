@@ -12,14 +12,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import type { TooltipContentProps } from "recharts";
 import {
   CHART_COLORS,
   aggregateEquityHistory,
   downsample,
   formatCurrency,
   formatDate,
-  formatTimestamp,
-  strategyColor,
   toNumber,
 } from "@/lib/dashboard";
 import type { AccountEquity, StrategyDailyPnl } from "@/lib/types";
@@ -40,6 +39,55 @@ const tooltipStyle = {
 
 const chartFrameClass = "h-[360px] min-h-[360px] min-w-0 w-full";
 const chartInitialDimension = { width: 640, height: 360 };
+const minimumVisiblePnl = 0.005;
+
+function PnlTooltip({
+  active,
+  label,
+  payload,
+}: TooltipContentProps) {
+  const items = payload.filter(
+    (item) =>
+      item.value !== undefined &&
+      Number.isFinite(Number(item.value)) &&
+      Math.abs(Number(item.value)) >= minimumVisiblePnl,
+  );
+
+  if (!active || items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="min-w-56 rounded-lg border border-white/[0.08] bg-[#08182a]/95 px-4 py-3 shadow-2xl backdrop-blur-sm">
+      <div className="mb-2 text-sm font-medium text-[#9bb3c3]">{label}</div>
+      <div className="space-y-1.5">
+        {items.map((item) => {
+          const value = Number(item.value);
+          const color = value < 0 ? CHART_COLORS.loss : CHART_COLORS.profit;
+          const name = String(item.name ?? item.dataKey ?? "Strategy");
+          return (
+            <div
+              className="flex items-center justify-between gap-5 font-mono text-sm"
+              key={`${name}-${value}`}
+            >
+              <span className="flex min-w-0 items-center gap-2 text-[#d6e7ef]">
+                <span
+                  aria-hidden="true"
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: color }}
+                />
+                <span className="truncate">{name}</span>
+              </span>
+              <span className="shrink-0 font-semibold" style={{ color }}>
+                {formatCurrency(value)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function centeredYAxisDomain(values: number[]): [number, number] {
   const finiteValues = values.filter((value) => Number.isFinite(value));
@@ -51,7 +99,7 @@ function centeredYAxisDomain(values: number[]): [number, number] {
   const dataMax = Math.max(...finiteValues);
   const span = dataMax - dataMin;
   const base = Math.max(Math.abs(dataMax), Math.abs(dataMin), 1);
-  const padding = span > 0 ? span * 0.55 : base * 0.06;
+  const padding = span > 0 ? span * 0.12 : base * 0.005;
 
   let lower = dataMin - padding;
   const upper = dataMax + padding;
@@ -73,17 +121,9 @@ function centeredYAxisDomain(values: number[]): [number, number] {
   return [niceLower, niceUpper];
 }
 
-export function EquityChart({
-  rows,
-  timezone,
-}: {
-  rows: AccountEquity[];
-  timezone: string;
-}) {
+export function EquityChart({ rows }: { rows: AccountEquity[] }) {
   const data = downsample(aggregateEquityHistory(rows), 3000).map((row) => ({
-    label: row.timestamp
-      ? formatTimestamp(row.timestamp, timezone)
-      : formatDate(row.date),
+    label: formatDate(row.date),
     equity: toNumber(row.equity_value),
   }));
   const yDomain = centeredYAxisDomain(data.map((item) => item.equity));
@@ -127,18 +167,50 @@ export function EquityChart({
 }
 
 export function PnlBarChart({ rows }: { rows: StrategyDailyPnl[] }) {
-  const strategies = [...new Set(rows.map((row) => row.strategy_name || "Unknown"))];
   const byDate = new Map<string, Record<string, string | number>>();
 
   for (const row of rows) {
+    if (row.daily_pnl === null || row.daily_pnl === undefined) {
+      continue;
+    }
+    const pnl = toNumber(row.daily_pnl);
+    if (Math.abs(pnl) < minimumVisiblePnl) {
+      continue;
+    }
     const date = formatDate(row.date);
     const strategy = row.strategy_name || "Unknown";
     const entry = byDate.get(date) ?? { date };
-    entry[strategy] = toNumber(entry[strategy]) + toNumber(row.daily_pnl);
+    entry[strategy] = toNumber(entry[strategy]) + pnl;
     byDate.set(date, entry);
   }
 
-  const data = downsample([...byDate.values()], 3000);
+  const nonZeroData = [...byDate.values()]
+    .map((entry) => {
+      const cleaned: Record<string, string | number> = { date: entry.date };
+      for (const [key, value] of Object.entries(entry)) {
+        if (key !== "date" && Math.abs(toNumber(value)) >= minimumVisiblePnl) {
+          cleaned[key] = value;
+        }
+      }
+      return cleaned;
+    })
+    .filter((entry) => Object.keys(entry).length > 1);
+  const strategies = [
+    ...new Set(
+      nonZeroData.flatMap((entry) =>
+        Object.keys(entry).filter((key) => key !== "date"),
+      ),
+    ),
+  ];
+  const data = downsample(nonZeroData, 3000);
+
+  if (data.length === 0 || strategies.length === 0) {
+    return (
+      <div className="flex min-h-24 items-center justify-center rounded-md border border-dashed border-white/[0.1] px-4 text-center text-sm text-[var(--muted)]">
+        No non-zero daily P&amp;L in the selected range.
+      </div>
+    );
+  }
 
   return (
     <div className={chartFrameClass}>
@@ -159,19 +231,18 @@ export function PnlBarChart({ rows }: { rows: StrategyDailyPnl[] }) {
             width={86}
           />
           <Tooltip
-            contentStyle={tooltipStyle}
-            formatter={(value, name) => [formatCurrency(Number(value)), name]}
-            labelStyle={{ color: "#91a9b8" }}
+            content={PnlTooltip}
+            cursor={{ fill: "rgba(125, 211, 252, 0.055)" }}
           />
-          {strategies.map((strategy, index) => (
-            <Bar key={strategy} dataKey={strategy} fill={strategyColor(strategy, index)}>
+          {strategies.map((strategy) => (
+            <Bar key={strategy} dataKey={strategy} fill={CHART_COLORS.profit}>
               {data.map((item, itemIndex) => (
                 <Cell
                   key={`${strategy}-${itemIndex}`}
                   fill={
                     toNumber(item[strategy]) < 0
                       ? CHART_COLORS.loss
-                      : strategyColor(strategy, index)
+                      : CHART_COLORS.profit
                   }
                 />
               ))}

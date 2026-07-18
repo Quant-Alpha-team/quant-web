@@ -12,6 +12,7 @@ export function MetricCard({
   value,
   delta,
   tone = "neutral",
+  deltaTone = "neutral",
   icon,
   iconTone,
 }: {
@@ -19,13 +20,14 @@ export function MetricCard({
   value: string;
   delta?: string;
   tone?: "neutral" | "profit" | "loss";
+  deltaTone?: "neutral" | "profit" | "loss";
   icon?: LucideIcon;
   iconTone?: SignalTone;
 }) {
   const deltaClass =
-    tone === "profit"
+    deltaTone === "profit"
       ? "text-[var(--profit)]"
-      : tone === "loss"
+      : deltaTone === "loss"
         ? "text-[var(--loss)]"
         : "text-[var(--muted)]";
   const edgeClass =
@@ -56,7 +58,7 @@ export function MetricCard({
             : "mint");
 
   return (
-    <div className="relative overflow-hidden rounded-md bg-[radial-gradient(circle_at_100%_0%,rgba(125,211,252,0.13),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.11),rgba(255,255,255,0.055))] p-4 shadow-[0_18px_42px_var(--shadow)] backdrop-blur-xl">
+    <div className="relative h-full min-h-[154px] overflow-hidden rounded-md bg-[radial-gradient(circle_at_100%_0%,rgba(125,211,252,0.13),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.11),rgba(255,255,255,0.055))] p-4 shadow-[0_18px_42px_var(--shadow)] backdrop-blur-xl">
       <div
         className={`absolute inset-x-0 top-0 h-px bg-linear-to-r ${edgeClass} to-transparent`}
       />

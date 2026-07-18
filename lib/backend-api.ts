@@ -2,6 +2,7 @@ import type {
   AccountEquity,
   FilterOptions,
   StrategyDailyPnl,
+  StrategyPosition,
   TradeExecution,
 } from "@/lib/types";
 
@@ -69,6 +70,7 @@ const apiConfig = {
   maxExecRows: optionalRowCap("API_MAX_EXEC_ROWS", 5000),
   maxPerfRows: optionalRowCap("API_MAX_PERF_ROWS", 5000),
   maxPnlRows: optionalRowCap("API_MAX_PNL_ROWS", 5000),
+  maxPositionRows: optionalRowCap("API_MAX_POSITION_ROWS", 5000),
 };
 
 async function requestJson<T>(
@@ -297,6 +299,25 @@ export async function getStrategyDailyPnl(params: {
       order: "asc",
     },
     apiConfig.maxPnlRows,
+  );
+}
+
+export async function getStrategyPositions(params: {
+  strategy: string;
+  accountId: string;
+  endDate: string;
+  timezone: string;
+}) {
+  return fetchAllPages<StrategyPosition>(
+    "/api/trading/portfolio/positions/",
+    {
+      strategy: params.strategy,
+      account_id: params.accountId,
+      as_of_date: params.endDate,
+      tz: params.timezone,
+      order: "asc",
+    },
+    apiConfig.maxPositionRows,
   );
 }
 

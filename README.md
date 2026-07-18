@@ -21,8 +21,12 @@ trade-log diagnostics.
 - Live dashboard fetch flow using `cache: "no-store"`, backend pagination, and
   configurable per-dataset row caps.
 - CLI launcher (`quant-web`) with backend API preflight check before startup.
-- CSV export support for strategy performance, account equity history, and raw
-  trade logs.
+- Broker-verified current holdings grouped by strategy and asset type, with
+  Schwab-style price change, market value, day change, cost basis, expiration,
+  gain/loss, and return columns; historical as-of snapshots remain available.
+- Overview KPIs that separate current, daily, realised, and unrealised P&L.
+- CSV export support for strategy positions, performance, account equity
+  history, and raw trade logs.
 
 ## Project Structure
 
@@ -83,8 +87,8 @@ Common settings:
 - `API_SYNC_TIMEOUT_SECONDS`: trading data synchronization timeout in seconds
   (`180` by default)
 - `API_PAGE_SIZE`: backend list API pagination page size
-- `API_MAX_EXEC_ROWS` / `API_MAX_PERF_ROWS` / `API_MAX_PNL_ROWS`: per-dataset
-  fetch caps (set `0` to disable a cap)
+- `API_MAX_EXEC_ROWS` / `API_MAX_PERF_ROWS` / `API_MAX_PNL_ROWS` /
+  `API_MAX_POSITION_ROWS`: per-dataset fetch caps (set `0` to disable a cap)
 - `API_PREFLIGHT_STRICT`: whether startup should fail when the backend API is
   unavailable (`false` by default)
 - `LOG_DIR`: directory for dashboard log files (`logs` by default)
