@@ -1,14 +1,11 @@
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.6.0"
+version_provider = "npm"
 version_scheme = "semver"
 tag_format = "v$version"
 update_changelog_on_bump = true
 major_version_zero = true
 version_files = [
-  'package.json:^  "version": "(?P<version>[^"]+)"',
-  'package-lock.json:^  "version": "(?P<version>[^"]+)"',
-  'package-lock.json:^      "version": "(?P<version>[^"]+)"',
   'README.md:^\*\*Version\*\*: (?P<version>.*)',
   'scripts/build.sh:IMG_VERSION'
 ]
