@@ -33,22 +33,7 @@ export const SECTIONS: { id: SectionId; label: string }[] = [
 export const CHART_COLORS = {
   profit: "#34d399",
   loss: "#fb7185",
-  accent: "#22d3ee",
-  cyan: "#38bdf8",
-  amber: "#fbbf24",
-  violet: "#c084fc",
-  rose: "#fb7185",
 };
-
-const STRATEGY_COLORS = [
-  CHART_COLORS.accent,
-  CHART_COLORS.profit,
-  CHART_COLORS.amber,
-  CHART_COLORS.violet,
-  CHART_COLORS.rose,
-  "#5eead4",
-  "#818cf8",
-];
 
 function pad(value: number) {
   return String(value).padStart(2, "0");
@@ -65,7 +50,7 @@ export function todayInTimeZone(timeZone: string) {
   return `${map.year}-${map.month}-${map.day}`;
 }
 
-export function addDays(dateValue: string, days: number) {
+function addDays(dateValue: string, days: number) {
   const [year, month, day] = dateValue.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
   date.setUTCDate(date.getUTCDate() + days);
@@ -162,22 +147,6 @@ function newestValue(values: Array<string | undefined>) {
   return newest;
 }
 
-function sumComplete<T>(rows: T[], readValue: (row: T) => unknown) {
-  if (rows.length === 0) {
-    return null;
-  }
-
-  let total = 0;
-  for (const row of rows) {
-    const value = optionalNumber(readValue(row));
-    if (value === null) {
-      return null;
-    }
-    total += value;
-  }
-  return total;
-}
-
 /**
  * Return one closing NAV point per account and trading date. If multiple
  * accounts are selected, carry each account's last known close forward and do
@@ -246,11 +215,9 @@ export function computeKpis(
   execRows: TradeExecution[],
   pnlRows: StrategyDailyPnl[],
   positionRows: StrategyPosition[],
-  asOfDate: string,
 ): KpiCards {
   const kpi: KpiCards = {
     accountNav: null,
-    accountCount: 0,
     navChange: null,
     navChangePercent: null,
     openPnl: null,
@@ -261,8 +228,6 @@ export function computeKpis(
     ),
     periodPnlRecords: 0,
     periodPnlPendingRecords: 0,
-    dayChange: null,
-    dayChangeSource: "UNAVAILABLE",
     totalTrades: execRows.length,
     openPositions: positionRows.length,
     openStrategies: new Set(
@@ -272,7 +237,6 @@ export function computeKpis(
       ),
     ).size,
     pricedPositions: 0,
-    previousClosePositions: 0,
   };
 
   const latestEquityByAccount = new Map<string, AccountEquity>();
@@ -293,7 +257,6 @@ export function computeKpis(
       (total, row) => total + toNumber(row.equity_value),
       0,
     );
-    kpi.accountCount = latestEquityRows.length;
   }
 
   const equitySeries = aggregateEquityHistory(perfRows);
@@ -323,9 +286,6 @@ export function computeKpis(
       optionalNumber(row.unrealized_pnl) !== null,
   );
   kpi.pricedPositions = pricedPositions.length;
-  kpi.previousClosePositions = positionRows.filter(
-    (row) => optionalNumber(row.day_change) !== null,
-  ).length;
   if (positionRows.length === 0) {
     kpi.openPnl = 0;
   } else if (pricedPositions.length === positionRows.length) {
@@ -333,22 +293,6 @@ export function computeKpis(
       (total, row) => total + toNumber(row.unrealized_pnl),
       0,
     );
-  }
-
-  const asOfPnlRows = pnlRows.filter((row) => row.date === asOfDate);
-  const strategyDailyPnl = sumComplete(asOfPnlRows, (row) => row.daily_pnl);
-  if (strategyDailyPnl !== null) {
-    kpi.dayChange = strategyDailyPnl;
-    kpi.dayChangeSource = "STRATEGY_DAILY_PNL";
-  } else if (
-    positionRows.length > 0 &&
-    kpi.previousClosePositions === positionRows.length
-  ) {
-    kpi.dayChange = positionRows.reduce(
-      (total, row) => total + toNumber(row.day_change),
-      0,
-    );
-    kpi.dayChangeSource = "OPEN_POSITIONS";
   }
 
   return kpi;
@@ -360,11 +304,6 @@ export function formatCurrency(value: number) {
     currency: "USD",
     maximumFractionDigits: 2,
   }).format(value);
-}
-
-export function formatCurrencyDelta(value: number) {
-  const prefix = value < 0 ? "-" : "";
-  return `${prefix}${formatCurrency(Math.abs(value))}`;
 }
 
 export function formatNumber(value: unknown, digits = 2) {
@@ -477,14 +416,6 @@ export function pnlSummary(rows: StrategyDailyPnl[]) {
         entry.wins + entry.losses > 0 || Math.abs(entry.pnl) >= 0.005,
     )
     .sort((a, b) => b.pnl - a.pnl);
-}
-
-export function strategyColor(strategy: string, index: number) {
-  let hash = 0;
-  for (const char of strategy) {
-    hash = (hash + char.charCodeAt(0)) % STRATEGY_COLORS.length;
-  }
-  return STRATEGY_COLORS[(hash + index) % STRATEGY_COLORS.length];
 }
 
 export function recordCounts(data: DashboardData) {

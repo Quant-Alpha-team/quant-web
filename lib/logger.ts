@@ -349,10 +349,6 @@ function log(level: LogLevel, message: string, fields?: LogFields) {
   writeLine(level, formatLine(level, message, fields));
 }
 
-export function logDebug(message: string, fields?: LogFields) {
-  log("DEBUG", message, fields);
-}
-
 export function logInfo(message: string, fields?: LogFields) {
   log("INFO", message, fields);
 }

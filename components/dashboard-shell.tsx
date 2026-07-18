@@ -158,12 +158,10 @@ function formatSignedPercent(value: number) {
 function OverviewPanel({
   strategy,
   accountId,
-  endDate,
   data,
 }: {
   strategy: string;
   accountId: string;
-  endDate: string;
   data: DashboardData;
 }) {
   const kpi = computeKpis(
@@ -171,7 +169,6 @@ function OverviewPanel({
     data.execRows,
     data.pnlRows,
     data.positionRows,
-    endDate,
   );
   const periodValue = kpi.periodPnl;
   const periodDetail = periodValue !== null
@@ -1377,7 +1374,6 @@ export function DashboardShell() {
         <OverviewPanel
           strategy={strategy}
           accountId={accountId}
-          endDate={range.endDate}
           data={data}
         />
       );

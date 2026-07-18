@@ -124,7 +124,6 @@ export type DashboardData = {
 
 export type KpiCards = {
   accountNav: number | null;
-  accountCount: number;
   navChange: number | null;
   navChangePercent: number | null;
   openPnl: number | null;
@@ -132,11 +131,8 @@ export type KpiCards = {
   totalCommission: number;
   periodPnlRecords: number;
   periodPnlPendingRecords: number;
-  dayChange: number | null;
-  dayChangeSource: "STRATEGY_DAILY_PNL" | "OPEN_POSITIONS" | "UNAVAILABLE";
   totalTrades: number;
   openPositions: number;
   openStrategies: number;
   pricedPositions: number;
-  previousClosePositions: number;
 };
