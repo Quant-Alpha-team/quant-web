@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  ArrowUpDown,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+} from "lucide-react";
 
 export type TableColumn<T> = {
   key: string;
@@ -9,6 +15,15 @@ export type TableColumn<T> = {
   render: (row: T) => React.ReactNode;
   align?: "left" | "right";
   width?: string;
+  sticky?: "left";
+  stickyOffset?: string;
+  stickyEdge?: boolean;
+  sortValue?: (row: T) => number | string | null | undefined;
+};
+
+type TableSort = {
+  key: string;
+  direction: "asc" | "desc";
 };
 
 type PaginationConfig = {
@@ -24,16 +39,56 @@ export function DataTable<T>({
   rows,
   columns,
   pagination,
+  minWidth,
 }: {
   rows: T[];
   columns: TableColumn<T>[];
   pagination?: PaginationConfig;
+  minWidth?: string;
 }) {
   const paginationEnabled = pagination?.enabled ?? false;
   const pageSizeOptions = pagination?.pageSizeOptions ?? [25, 50, 100];
   const defaultPageSize = pagination?.pageSize ?? pageSizeOptions[0] ?? 25;
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(defaultPageSize);
+  const [sort, setSort] = useState<TableSort | null>(null);
+
+  const sortColumn = sort
+    ? columns.find((column) => column.key === sort.key && column.sortValue)
+    : undefined;
+  const sortedRows = sortColumn?.sortValue
+    ? rows
+        .map((row, index) => ({ row, index }))
+        .sort((left, right) => {
+          const leftValue = sortColumn.sortValue?.(left.row);
+          const rightValue = sortColumn.sortValue?.(right.row);
+          const leftMissing =
+            leftValue === null || leftValue === undefined || leftValue === "";
+          const rightMissing =
+            rightValue === null || rightValue === undefined || rightValue === "";
+
+          if (leftMissing !== rightMissing) {
+            return leftMissing ? 1 : -1;
+          }
+
+          let comparison = 0;
+          if (!leftMissing && !rightMissing) {
+            comparison =
+              typeof leftValue === "number" && typeof rightValue === "number"
+                ? leftValue - rightValue
+                : String(leftValue).localeCompare(String(rightValue), undefined, {
+                    numeric: true,
+                    sensitivity: "base",
+                  });
+          }
+
+          if (comparison === 0) {
+            return left.index - right.index;
+          }
+          return sort?.direction === "desc" ? -comparison : comparison;
+        })
+        .map(({ row }) => row)
+    : rows;
 
   const totalRows = rows.length;
   const totalPages = paginationEnabled
@@ -44,12 +99,22 @@ export function DataTable<T>({
   const endIndex = paginationEnabled
     ? Math.min(startIndex + pageSize, totalRows)
     : totalRows;
-  const visibleRows = paginationEnabled ? rows.slice(startIndex, endIndex) : rows;
+  const visibleRows = paginationEnabled
+    ? sortedRows.slice(startIndex, endIndex)
+    : sortedRows;
 
   return (
     <div className="space-y-3">
-      <div className="overflow-x-auto rounded-md bg-white/[0.07] shadow-[0_18px_42px_var(--shadow)] backdrop-blur-xl">
+      <div
+        tabIndex={minWidth ? 0 : undefined}
+        aria-label={minWidth ? "Horizontally scrollable data table" : undefined}
+        className={
+          (minWidth ? "overflow-x-scroll " : "overflow-x-auto ") +
+          "overscroll-x-contain rounded-md bg-white/[0.07] shadow-[0_18px_42px_var(--shadow)] backdrop-blur-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60"
+        }
+      >
         <table
+          style={minWidth ? { minWidth } : undefined}
           className={
             "min-w-full border-collapse text-sm " +
             (columns.some((column) => column.width) ? "table-fixed" : "")
@@ -57,17 +122,96 @@ export function DataTable<T>({
         >
           <thead className="bg-white/[0.08] text-left text-xs uppercase tracking-normal text-[var(--muted)]">
             <tr>
-              {columns.map((column) => (
-                <th
-                  key={column.key}
-                  style={column.width ? { width: column.width } : undefined}
-                  className={`whitespace-nowrap px-4 py-3 font-medium ${
-                    column.align === "right" ? "text-right" : "text-left"
-                  }`}
-                >
-                  {column.label}
-                </th>
-              ))}
+              {columns.map((column) => {
+                const isSorted = sort?.key === column.key;
+                return (
+                  <th
+                    key={column.key}
+                    aria-sort={
+                      column.sortValue
+                        ? isSorted
+                          ? sort?.direction === "asc"
+                            ? "ascending"
+                            : "descending"
+                          : "none"
+                        : undefined
+                    }
+                    style={
+                      column.width || column.sticky
+                        ? {
+                            width: column.width,
+                            minWidth: column.sticky ? column.width : undefined,
+                            maxWidth: column.sticky ? column.width : undefined,
+                            left:
+                              column.sticky === "left"
+                                ? (column.stickyOffset ?? "0px")
+                                : undefined,
+                          }
+                        : undefined
+                    }
+                    className={`whitespace-nowrap px-4 py-3 font-medium ${
+                      column.align === "right" ? "text-right" : "text-left"
+                    } ${
+                      column.sticky === "left"
+                        ? "sticky z-20 bg-[#30495c] " +
+                          (column.stickyEdge
+                            ? "shadow-[4px_0_10px_rgba(0,7,20,0.14)]"
+                            : "")
+                        : ""
+                    }`}
+                  >
+                    {column.sortValue ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSort((current) => {
+                            if (current?.key !== column.key) {
+                              return { key: column.key, direction: "asc" };
+                            }
+                            if (current.direction === "asc") {
+                              return { key: column.key, direction: "desc" };
+                            }
+                            return null;
+                          });
+                          setPage(1);
+                        }}
+                        title={
+                          isSorted
+                            ? sort?.direction === "asc"
+                              ? `Sort ${column.label} descending`
+                              : `Clear ${column.label} sorting`
+                            : `Sort ${column.label} ascending`
+                        }
+                        className={`inline-flex w-full cursor-pointer items-center gap-1.5 rounded-sm transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 ${
+                          column.align === "right" ? "justify-end" : "justify-start"
+                        }`}
+                      >
+                        <span>{column.label}</span>
+                        {isSorted ? (
+                          sort?.direction === "asc" ? (
+                            <ChevronUp
+                              className="h-3.5 w-3.5 text-cyan-300"
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <ChevronDown
+                              className="h-3.5 w-3.5 text-cyan-300"
+                              aria-hidden="true"
+                            />
+                          )
+                        ) : (
+                          <ArrowUpDown
+                            className="h-3.5 w-3.5 opacity-50"
+                            aria-hidden="true"
+                          />
+                        )}
+                      </button>
+                    ) : (
+                      column.label
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -79,8 +223,28 @@ export function DataTable<T>({
                 {columns.map((column) => (
                   <td
                     key={column.key}
+                    style={
+                      column.width || column.sticky
+                        ? {
+                            width: column.width,
+                            minWidth: column.sticky ? column.width : undefined,
+                            maxWidth: column.sticky ? column.width : undefined,
+                            left:
+                              column.sticky === "left"
+                                ? (column.stickyOffset ?? "0px")
+                                : undefined,
+                          }
+                        : undefined
+                    }
                     className={`whitespace-nowrap px-4 py-3 ${
                       column.align === "right" ? "text-right" : "text-left"
+                    } ${
+                      column.sticky === "left"
+                        ? "sticky z-10 bg-[#20374a] " +
+                          (column.stickyEdge
+                            ? "shadow-[4px_0_10px_rgba(0,7,20,0.14)]"
+                            : "")
+                        : ""
                     }`}
                   >
                     {column.render(row)}

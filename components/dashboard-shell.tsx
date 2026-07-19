@@ -3,7 +3,9 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  ArrowUpDown,
   ChevronDown,
+  ChevronUp,
   Download,
   FoldVertical,
   RadioTower,
@@ -346,26 +348,65 @@ function StrategyPnlPanel({ rows }: { rows: StrategyDailyPnl[] }) {
   const summary = pnlSummary(informativeRows);
   const orderedRows = sortByNewest(informativeRows);
   const summaryColumns: TableColumn<(typeof summary)[number]>[] = [
-    { key: "strategy", label: "Strategy", render: (row) => row.strategy },
+    {
+      key: "strategy",
+      label: "Strategy",
+      width: "24%",
+      sortValue: (row) => row.strategy,
+      render: (row) => row.strategy,
+    },
     {
       key: "pnl",
       label: "P&L",
       align: "right",
+      width: "20%",
+      sortValue: (row) => row.pnl,
       render: (row) => formatCurrency(row.pnl),
     },
-    { key: "wins", label: "Wins", align: "right", render: (row) => row.wins },
-    { key: "losses", label: "Losses", align: "right", render: (row) => row.losses },
+    {
+      key: "wins",
+      label: "Wins",
+      align: "right",
+      width: "18%",
+      sortValue: (row) => row.wins,
+      render: (row) => row.wins,
+    },
+    {
+      key: "losses",
+      label: "Losses",
+      align: "right",
+      width: "18%",
+      sortValue: (row) => row.losses,
+      render: (row) => row.losses,
+    },
     {
       key: "winRate",
       label: "Win Rate",
       align: "right",
+      width: "20%",
+      sortValue: (row) => row.winRate,
       render: (row) => `${row.winRate.toFixed(1)}%`,
     },
   ];
 
   const rawColumns: TableColumn<StrategyDailyPnl>[] = [
-    { key: "date", label: "Date", render: (row) => formatDate(row.date) },
-    { key: "strategy", label: "Strategy", render: (row) => row.strategy_name ?? "—" },
+    {
+      key: "date",
+      label: "Date",
+      width: "140px",
+      sticky: "left",
+      sortValue: (row) => row.date,
+      render: (row) => formatDate(row.date),
+    },
+    {
+      key: "strategy",
+      label: "Strategy",
+      width: "250px",
+      sticky: "left",
+      stickyOffset: "140px",
+      stickyEdge: true,
+      render: (row) => row.strategy_name ?? "—",
+    },
     {
       key: "account",
       label: "Account",
@@ -400,7 +441,7 @@ function StrategyPnlPanel({ rows }: { rows: StrategyDailyPnl[] }) {
 
   return (
     <Panel title="Strategy P&L Performance" helpText={strategyPnlHelp}>
-      <div className="grid gap-4 xl:grid-cols-[minmax(320px,0.8fr)_minmax(520px,1.2fr)]">
+      <div className="grid gap-4">
         <DataTable rows={summary} columns={summaryColumns} />
         <div className={surfaceClass}>
           <PnlBarChart rows={informativeRows} />
@@ -442,6 +483,7 @@ function StrategyPnlPanel({ rows }: { rows: StrategyDailyPnl[] }) {
           key={`pnl-${informativeRows.length}-${orderedRows[0]?.date ?? "empty"}`}
           rows={orderedRows}
           columns={rawColumns}
+          minWidth="1600px"
           pagination={{ enabled: true, pageSize: 20 }}
         />
       </div>
@@ -520,6 +562,75 @@ function formatPositionPercent(value: unknown) {
   return numeric === null ? "—" : formatNumber(numeric, 2) + "%";
 }
 
+type PositionSortKey =
+  | "quantity"
+  | "mark_price"
+  | "market_value"
+  | "cost_basis"
+  | "day_change"
+  | "unrealized_pnl"
+  | "gain_loss_percent"
+  | "expiry_date";
+
+type PositionSortState = {
+  key: PositionSortKey;
+  direction: "asc" | "desc";
+};
+
+const positionTableColumns: Array<{
+  label: string;
+  align: "left" | "right";
+  sortKey?: PositionSortKey;
+}> = [
+  { label: "Symbol", align: "left" },
+  { label: "Description", align: "left" },
+  { label: "Qty", align: "right", sortKey: "quantity" },
+  { label: "Price", align: "right", sortKey: "mark_price" },
+  { label: "Mkt Val", align: "right", sortKey: "market_value" },
+  { label: "Cost Basis", align: "right", sortKey: "cost_basis" },
+  { label: "P/L Day", align: "right", sortKey: "day_change" },
+  { label: "P/L", align: "right", sortKey: "unrealized_pnl" },
+  { label: "P/L %", align: "right", sortKey: "gain_loss_percent" },
+  { label: "Exp/Mat", align: "left", sortKey: "expiry_date" },
+];
+
+function sortPositionRows(rows: StrategyPosition[], sort: PositionSortState | null) {
+  if (!sort) {
+    return rows;
+  }
+
+  return [...rows].sort((left, right) => {
+    const leftValue = left[sort.key];
+    const rightValue = right[sort.key];
+    const leftMissing =
+      leftValue === null || leftValue === undefined || leftValue === "";
+    const rightMissing =
+      rightValue === null || rightValue === undefined || rightValue === "";
+
+    if (leftMissing !== rightMissing) {
+      return leftMissing ? 1 : -1;
+    }
+
+    let comparison = 0;
+    if (!leftMissing && !rightMissing) {
+      if (sort.key === "expiry_date") {
+        comparison = String(leftValue).localeCompare(String(rightValue));
+      } else {
+        comparison =
+          (optionalPositionNumber(leftValue) ?? 0) -
+          (optionalPositionNumber(rightValue) ?? 0);
+      }
+    }
+
+    if (comparison === 0) {
+      comparison = positionInstrumentLabel(left).localeCompare(
+        positionInstrumentLabel(right),
+      );
+    }
+    return sort.direction === "asc" ? comparison : -comparison;
+  });
+}
+
 function sumPositionValues(
   rows: StrategyPosition[],
   readValue: (row: StrategyPosition) => unknown,
@@ -568,6 +679,9 @@ function StrategyPositionsPanel({
   const [collapsedStrategies, setCollapsedStrategies] = useState<Set<string>>(
     () => new Set(),
   );
+  const [positionSortByStrategy, setPositionSortByStrategy] = useState<
+    Record<string, PositionSortState | null>
+  >({});
   const allStrategiesCollapsed =
     strategyGroups.length > 0 &&
     strategyGroups.every(([strategyName]) => collapsedStrategies.has(strategyName));
@@ -581,6 +695,22 @@ function StrategyPositionsPanel({
         next.add(strategyName);
       }
       return next;
+    });
+  }
+
+  function togglePositionSort(strategyName: string, key: PositionSortKey) {
+    setPositionSortByStrategy((current) => {
+      const currentSort = current[strategyName];
+      const nextSort: PositionSortState | null =
+        currentSort?.key !== key
+          ? { key, direction: "asc" }
+          : currentSort.direction === "asc"
+            ? { key, direction: "desc" }
+            : null;
+      return {
+        ...current,
+        [strategyName]: nextSort,
+      };
     });
   }
 
@@ -683,6 +813,7 @@ function StrategyPositionsPanel({
               (row) => row.source === "BROKER_RECONCILED",
             ).length;
             const isCollapsed = collapsedStrategies.has(strategyName);
+            const positionSort = positionSortByStrategy[strategyName] ?? null;
             const assetMap = new Map<string, { label: string; rows: StrategyPosition[] }>();
             for (const row of strategyRows) {
               const asset = positionAssetGroup(row.sec_type);
@@ -757,7 +888,7 @@ function StrategyPositionsPanel({
                           tone: "",
                         },
                         {
-                          label: "Gain / loss",
+                          label: "Unrealized P/L",
                           value: formatCurrency(gainLoss.total),
                           complete: gainLoss.complete,
                           tone: positionValueClass(gainLoss.total),
@@ -802,37 +933,78 @@ function StrategyPositionsPanel({
                         <table className="w-full min-w-[1160px] table-fixed border-collapse text-[12px]">
                           <thead className="sticky top-0 z-20 bg-[#173451] text-[10px] uppercase tracking-wide text-[#b7ccd8]">
                             <tr>
-                              {[
-                                ["Symbol", "left"],
-                                ["Description", "left"],
-                                ["Qty", "right"],
-                                ["Price", "right"],
-                                ["Mkt Val", "right"],
-                                ["Cost Basis", "right"],
-                                ["P/L Day", "right"],
-                                ["P/L", "right"],
-                                ["P/L %", "right"],
-                                ["Exp/Mat", "left"],
-                              ].map(([label, align]) => (
-                                <th
-                                  key={label}
-                                  className={
-                                    "whitespace-nowrap border-b border-white/[0.12] px-3 py-3 font-semibold " +
-                                    (align === "right" ? "text-right" : "text-left") +
-                                    (label === "Symbol"
-                                      ? " sticky left-0 z-30 w-[8%] bg-[#173451]"
-                                      : label === "Description"
-                                        ? " sticky left-[8%] z-30 w-[12%] bg-[#173451] shadow-[8px_0_16px_rgba(0,7,20,0.24)]"
-                                        : "")
-                                  }
-                                >
-                                  {label}
-                                </th>
-                              ))}
+                              {positionTableColumns.map(
+                                ({ label, align, sortKey }) => (
+                                  <th
+                                    key={label}
+                                    aria-sort={
+                                      sortKey
+                                        ? positionSort?.key === sortKey
+                                          ? positionSort.direction === "asc"
+                                            ? "ascending"
+                                            : "descending"
+                                          : "none"
+                                        : undefined
+                                    }
+                                    className={
+                                      "whitespace-nowrap border-b border-white/[0.12] px-3 py-3 font-semibold " +
+                                      (align === "right" ? "text-right" : "text-left") +
+                                      (label === "Symbol"
+                                        ? " sticky left-0 z-30 w-[8%] bg-[#173451]"
+                                        : label === "Description"
+                                          ? " sticky left-[8%] z-30 w-[12%] bg-[#173451] shadow-[8px_0_16px_rgba(0,7,20,0.24)]"
+                                          : "")
+                                    }
+                                  >
+                                    {sortKey ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => togglePositionSort(strategyName, sortKey)}
+                                        className={
+                                          "inline-flex w-full cursor-pointer items-center gap-1.5 rounded-sm transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 " +
+                                          (align === "right"
+                                            ? "justify-end"
+                                            : "justify-start")
+                                        }
+                                        title={
+                                          positionSort?.key === sortKey
+                                            ? positionSort.direction === "asc"
+                                              ? `Sort ${label} descending`
+                                              : `Clear ${label} sorting`
+                                            : `Sort ${label} ascending`
+                                        }
+                                      >
+                                        <span>{label}</span>
+                                        {positionSort?.key === sortKey ? (
+                                          positionSort.direction === "asc" ? (
+                                            <ChevronUp
+                                              className="h-3.5 w-3.5 text-cyan-300"
+                                              aria-hidden="true"
+                                            />
+                                          ) : (
+                                            <ChevronDown
+                                              className="h-3.5 w-3.5 text-cyan-300"
+                                              aria-hidden="true"
+                                            />
+                                          )
+                                        ) : (
+                                          <ArrowUpDown
+                                            className="h-3.5 w-3.5 opacity-50"
+                                            aria-hidden="true"
+                                          />
+                                        )}
+                                      </button>
+                                    ) : (
+                                      label
+                                    )}
+                                  </th>
+                                ),
+                              )}
                             </tr>
                           </thead>
                           <tbody>
-                            {assetGroup.rows.map((row, rowIndex) => (
+                            {sortPositionRows(assetGroup.rows, positionSort).map(
+                              (row, rowIndex) => (
                               <tr
                                 key={(row.broker_account_id ?? "") + "-" + positionInstrumentLabel(row) + "-" + rowIndex}
                                 className="group border-b border-white/[0.065] bg-white/[0.015] transition hover:bg-cyan-300/[0.055]"
@@ -884,7 +1056,8 @@ function StrategyPositionsPanel({
                                   {row.expiry_date ?? "—"}
                                 </td>
                               </tr>
-                            ))}
+                              ),
+                            )}
                           </tbody>
                         </table>
                       </div>
@@ -958,6 +1131,7 @@ function AccountEquityPanel({
       key: "date",
       label: "Date",
       width: "20%",
+      sortValue: (row) => row.timestamp ?? row.date,
       render: (row) => (
         <div>
           <div className="font-medium text-[var(--foreground)]">
@@ -1134,10 +1308,21 @@ function TradeLogsPanel({
   const columns: TableColumn<TradeExecution>[] = [
     {
       key: "timestamp",
-      label: "Timestamp",
+      label: "Date",
+      width: "205px",
+      sticky: "left",
+      sortValue: (row) => row.timestamp,
       render: (row) => formatTimestamp(row.timestamp, timezone),
     },
-    { key: "strategy", label: "Strategy", render: (row) => row.strategy_name ?? "-" },
+    {
+      key: "strategy",
+      label: "Strategy",
+      width: "270px",
+      sticky: "left",
+      stickyOffset: "205px",
+      stickyEdge: true,
+      render: (row) => row.strategy_name ?? "-",
+    },
     {
       key: "account",
       label: "Account ID",
@@ -1218,6 +1403,7 @@ function TradeLogsPanel({
           key={`trades-${rows.length}-${sortedRows[0]?.timestamp ?? "empty"}`}
           rows={sortedRows}
           columns={columns}
+          minWidth="2200px"
           pagination={{ enabled: true, pageSize: 25 }}
         />
       )}
