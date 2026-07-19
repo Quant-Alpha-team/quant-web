@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, Download, RadioTower, RefreshCw, ShieldCheck } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  Download,
+  FoldVertical,
+  RadioTower,
+  RefreshCw,
+  ShieldCheck,
+  UnfoldVertical,
+} from "lucide-react";
 import { EquityChart, PnlBarChart } from "@/components/dashboard-charts";
 import { DataTable, type TableColumn } from "@/components/data-table";
 import { MetricCard } from "@/components/metric-card";
@@ -559,6 +568,9 @@ function StrategyPositionsPanel({
   const [collapsedStrategies, setCollapsedStrategies] = useState<Set<string>>(
     () => new Set(),
   );
+  const allStrategiesCollapsed =
+    strategyGroups.length > 0 &&
+    strategyGroups.every(([strategyName]) => collapsedStrategies.has(strategyName));
 
   function toggleStrategy(strategyName: string) {
     setCollapsedStrategies((current) => {
@@ -614,19 +626,19 @@ function StrategyPositionsPanel({
                 type="button"
                 onClick={() =>
                   setCollapsedStrategies(
-                    new Set(strategyGroups.map(([strategyName]) => strategyName)),
+                    allStrategiesCollapsed
+                      ? new Set()
+                      : new Set(strategyGroups.map(([strategyName]) => strategyName)),
                   )
                 }
                 className={secondaryButtonClass}
               >
-                Collapse all
-              </button>
-              <button
-                type="button"
-                onClick={() => setCollapsedStrategies(new Set())}
-                className={secondaryButtonClass}
-              >
-                Expand all
+                {allStrategiesCollapsed ? (
+                  <UnfoldVertical className="h-4 w-4" />
+                ) : (
+                  <FoldVertical className="h-4 w-4" />
+                )}
+                {allStrategiesCollapsed ? "Expand all" : "Collapse all"}
               </button>
               <button
                 type="button"
