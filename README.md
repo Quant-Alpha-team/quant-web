@@ -1,157 +1,273 @@
 # Quant Alpha Dashboard
 
-**Quant Alpha Dashboard** is a Next.js-based monitoring UI for the Quant Alpha
-ecosystem, focused on strategy performance, account equity tracking, and
-trade-log diagnostics.
+Next.js dashboard for monitoring the Quant Alpha trading platform. It combines
+strategy performance, account equity, broker positions, and execution records
+behind a single filterable interface.
 
 > [!IMPORTANT]
-> **Node.js >= 22 is required.**
+> Node.js 22 or newer is required. The dashboard also needs a reachable Quant
+> Alpha backend API to load trading data.
 
-## Key Features
+## What the dashboard provides
 
-- Timezone-consistent query boundaries across executions, equity history, and
-  strategy P&L.
-- Read-only integration with the backend query API using token authentication.
-- Server-side API proxy through Next.js route handlers, keeping `API_TOKEN`
-  out of the browser.
-- Modular React UI architecture with separate sidebar filters, section
-  controls, chart renderers, tables, metric cards, and status components.
-- App Router structure with dynamic API route handlers for dashboard data,
-  filter metadata, and backend health checks.
-- Live dashboard fetch flow using `cache: "no-store"`, backend pagination, and
-  configurable per-dataset row caps.
-- CLI launcher (`quant-web`) with backend API preflight check before startup.
-- Broker-verified current holdings grouped by strategy and asset type, with
-  Schwab-style price change, market value, day change, cost basis, expiration,
-  gain/loss, and return columns; historical as-of snapshots remain available.
-- Overview KPIs that separate current, daily, realised, and unrealised P&L.
-- CSV export support for strategy positions, performance, account equity
-  history, and raw trade logs.
+- **Overview** — account NAV, period change, realized and unrealized P&L,
+  commissions, trade counts, and open-position coverage.
+- **Strategy P&L** — daily total, realized, and unrealized P&L with valuation
+  status, charts, sortable tables, and CSV export.
+- **Positions** — broker-reconciled holdings grouped by strategy and asset type,
+  including price change, market value, day change, cost basis, expiration, and
+  gain/loss.
+- **Account Equity** — daily account snapshots, period change, equity history,
+  charts, and CSV export.
+- **Trade Logs** — paginated and sortable execution records with CSV export.
+- **Diagnostics** — loaded-row counts and query context for troubleshooting.
+- Strategy, broker account, date-range, and display-timezone filters.
+- One-click backend reconciliation before refreshing the visible data.
+- Responsive layout, collapsible navigation, and sortable position tables.
 
-## Project Structure
+## Architecture
+
+The browser only calls the dashboard's internal route handlers. Those handlers
+query the backend with server-side credentials, so `API_TOKEN` is never sent to
+the browser.
+
+```text
+Browser
+  │
+  ├── /api/dashboard/filters ──┐
+  ├── /api/dashboard/data ─────┼── Next.js server ── Quant Alpha backend API
+  ├── /api/dashboard/sync ─────┤
+  └── /api/health ─────────────┘
+```
+
+Dashboard requests are uncached and paginated. Per-dataset row limits prevent
+unbounded responses and can be adjusted through environment variables.
+
+## Requirements
+
+- Node.js 22+
+- npm and the committed `package-lock.json`
+- A Quant Alpha backend exposing these routes:
+
+| Method | Backend route | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/health/` | Connectivity check |
+| `GET` | `/api/trading/meta/filters/` | Strategies and broker accounts |
+| `GET` | `/api/trading/trades/executions/` | Trade executions |
+| `GET` | `/api/trading/accounts/equity-history/` | Account equity history |
+| `GET` | `/api/trading/strategies/daily-pnl/` | Daily strategy P&L |
+| `GET` | `/api/trading/portfolio/positions/` | Strategy positions as of a date |
+| `POST` | `/api/trading/reconciliation/sync/` | Trading-data reconciliation |
+
+Except for the health check, backend requests use
+`Authorization: Token <API_TOKEN>` unless authentication is explicitly disabled.
+
+## Quick start
+
+1. Install the locked dependencies:
+
+   ```bash
+   npm ci
+   ```
+
+2. Create the local configuration:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   At minimum, set `API_BASE_URL` and `API_TOKEN`. For a trusted local backend
+   without authentication, set `API_AUTH_DISABLED=true` instead.
+
+3. Start the development server:
+
+   ```bash
+   npm run dev
+   ```
+
+4. Open [http://localhost:3000](http://localhost:3000).
+
+To confirm that the dashboard can reach the backend, request
+[http://localhost:3000/api/health](http://localhost:3000/api/health). A healthy
+response is `{ "ok": true }`.
+
+## Configuration
+
+The application reads `.env` through Next.js. The optional `quant-web` launcher
+also loads `.env.local` first and then `.env`, without overwriting variables
+already present in the shell.
+
+### Backend connection
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `API_BASE_URL` | `http://127.0.0.1:8000` | Backend origin without a trailing API path |
+| `API_TOKEN` | empty | Token sent in the server-side `Authorization` header |
+| `API_AUTH_DISABLED` | `false` | Disables the authorization header; use only for trusted local backends |
+| `API_TIMEOUT_SECONDS` | `15` | Timeout for normal backend requests and launcher preflight |
+| `API_SYNC_TIMEOUT_SECONDS` | `180` | Timeout for reconciliation requests |
+| `API_PAGE_SIZE` | `500` | Rows requested per backend page; capped at `2000` |
+| `API_PREFLIGHT_STRICT` | `false` | Makes the `quant-web` launcher exit when its backend preflight fails |
+
+### Dataset limits
+
+Each limit defaults to `5000` rows. Set a value to `0` to disable that dataset's
+cap.
+
+| Variable | Dataset |
+| --- | --- |
+| `API_MAX_EXEC_ROWS` | Trade executions |
+| `API_MAX_PERF_ROWS` | Account equity history |
+| `API_MAX_PNL_ROWS` | Daily strategy P&L |
+| `API_MAX_POSITION_ROWS` | Strategy positions |
+
+### Server and logging
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PORT` | `3000` | Next.js listening port |
+| `HOSTNAME` | `localhost` | Host used by the `quant-web` launcher; the Docker image uses `0.0.0.0` |
+| `LOG_DIR` | `logs` | Log directory, relative to the project root unless absolute |
+| `LOG_FILE` | `dashboard.log` | Active log filename |
+| `LOG_LEVEL` | `INFO` | Minimum level: `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
+| `LOG_RETENTION_DAYS` | `7` | Retention for rotated log files |
+| `TZ` | system timezone | Timezone for log timestamps and daily rotation; falls back to `America/New_York` |
+
+Logs rotate daily as `dashboard.log.YYYY-MM-DD`. If the log directory cannot be
+created or written, file logging is disabled and messages continue on stdout.
+
+## Running the application
+
+### npm scripts
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the development server |
+| `npm run build` | Create the standalone production build |
+| `npm run start` | Start a previously built production server |
+| `npm run lint` | Run ESLint |
+
+For a local production run:
+
+```bash
+npm run build
+npm run start
+```
+
+### CLI launcher
+
+The optional launcher adds `.env` loading, rotating launcher logs, and a backend
+health preflight before Next.js starts.
+
+```bash
+npm link
+
+# Development mode
+quant-web
+quant-web --port 3001
+
+# Production mode; run npm run build first
+quant-web start --port 3000
+```
+
+With the default `API_PREFLIGHT_STRICT=false`, an unavailable backend produces a
+warning and the UI still starts. Set it to `true` when startup should fail fast.
+
+### Docker
+
+The multi-stage image builds a standalone Next.js server and runs it as an
+unprivileged user.
+
+```bash
+docker build -t quant-web:local .
+docker run --rm --env-file .env -p 3000:3000 quant-web:local
+```
+
+Inside a container, `127.0.0.1` refers to the container itself. Set
+`API_BASE_URL` to a hostname or container-network address that can reach the
+backend. Mount `/app/logs` to a writable host directory if logs must survive
+container replacement.
+
+Maintainers can use the Buildx helper for local or multi-architecture images:
+
+```bash
+# Local image for the detected architecture
+./scripts/build.sh --local
+
+# Local image for a selected architecture
+./scripts/build.sh --local --arch amd
+./scripts/build.sh --local --arch arm
+
+# Build and push linux/amd64 and linux/arm64 images
+./scripts/build.sh --remote
+```
+
+Remote builds push to both configured registries. Override `REGISTRY_GH` and
+`REGISTRY_GL` when different registry namespaces are required.
+
+## Project structure
 
 ```text
 quant-web/
 ├── app/
 │   ├── api/
 │   │   ├── dashboard/
-│   │   │   ├── data/route.ts      # Dashboard data proxy
-│   │   │   └── filters/route.ts   # Filter metadata proxy
-│   │   └── health/route.ts        # Backend health proxy
-│   ├── globals.css                # Global Tailwind styles and theme tokens
-│   ├── layout.tsx                 # Root Next.js layout
-│   └── page.tsx                   # Dashboard page entry
-├── components/
-│   ├── dashboard-shell.tsx        # Main client-side dashboard orchestration
-│   ├── sidebar-filters.tsx        # Sidebar filter controls
-│   ├── section-control.tsx        # Dashboard section switcher
-│   ├── dashboard-charts.tsx       # Recharts visualizations
-│   ├── data-table.tsx             # Paginated table component
-│   ├── metric-card.tsx            # KPI card component
-│   ├── signal-icon.tsx            # Shared icon badge component
-│   └── status-message.tsx         # Loading, info, and error messages
-├── lib/
-│   ├── backend-api.ts             # Backend API client and pagination layer
-│   ├── dashboard.ts               # Date, KPI, formatting, and chart helpers
-│   ├── logger.ts                  # Server-side dashboard logger and rotation
-│   └── types.ts                   # Shared TypeScript data contracts
+│   │   │   ├── data/route.ts       # Section-aware data proxy
+│   │   │   ├── filters/route.ts    # Filter metadata proxy
+│   │   │   └── sync/route.ts       # Reconciliation proxy
+│   │   └── health/route.ts         # Backend health proxy
+│   ├── globals.css                 # Theme and global styles
+│   ├── layout.tsx                  # Root layout
+│   └── page.tsx                    # Dashboard entry page
 ├── bin/
-│   └── quant-web.mjs              # CLI entry point (`quant-web`)
-├── .env                           # Environment variable template
-├── package.json                   # npm scripts and dependencies
-└── tsconfig.json
+│   └── quant-web.mjs               # CLI launcher and startup logging
+├── components/
+│   ├── dashboard-shell.tsx         # Dashboard state and section views
+│   ├── dashboard-charts.tsx        # Recharts visualizations
+│   ├── data-table.tsx              # Paginated, sortable data table
+│   ├── metric-card.tsx             # KPI cards
+│   ├── section-control.tsx         # Dashboard section navigation
+│   ├── sidebar-filters.tsx         # Query filters
+│   ├── signal-icon.tsx             # Shared icon treatment
+│   └── status-message.tsx          # Loading and error states
+├── lib/
+│   ├── backend-api.ts              # Authenticated API client and pagination
+│   ├── dashboard.ts                # Date, KPI, chart, and formatting helpers
+│   ├── logger.ts                   # Server-side log rotation
+│   └── types.ts                    # Shared TypeScript contracts
+├── public/                         # Static assets
+├── scripts/
+│   └── build.sh                    # Docker Buildx helper
+├── .env.example                    # Configuration template
+├── Dockerfile                      # Standalone production image
+├── next.config.mjs                 # Next.js standalone output settings
+└── package.json                    # Scripts and dependencies
 ```
 
-## Quick Start
+## Troubleshooting
 
-### 1. Install
+- **Missing API token** — set `API_TOKEN`, or use
+  `API_AUTH_DISABLED=true` only with a trusted unauthenticated backend.
+- **Dashboard starts without data** — check `API_BASE_URL`, then open
+  `/api/health` and inspect `logs/dashboard.log`.
+- **Refresh times out** — increase `API_SYNC_TIMEOUT_SECONDS`; reconciliation
+  can take longer than normal read requests.
+- **Incomplete tables** — raise the relevant `API_MAX_*_ROWS` value or set it to
+  `0`, taking backend and browser memory usage into account.
+- **Docker cannot reach the backend** — do not use `127.0.0.1` unless the
+  backend runs in the same container; use a shared Docker network or a reachable
+  host address.
 
-```bash
-npm install
-npm link
-```
+## Development checks
 
-### 2. Configure
-
-```bash
-cp .env.example .env
-```
-
-Common settings:
-
-- `API_BASE_URL`: backend API base URL, for example `http://127.0.0.1:8000`
-- `API_TOKEN`: API token used as `Authorization: Token <key>`
-- `API_AUTH_DISABLED`: skip token auth for local test backends (`true`
-  disables the Authorization header)
-- `API_TIMEOUT_SECONDS`: backend request timeout in seconds
-- `API_SYNC_TIMEOUT_SECONDS`: trading data synchronization timeout in seconds
-  (`180` by default)
-- `API_PAGE_SIZE`: backend list API pagination page size
-- `API_MAX_EXEC_ROWS` / `API_MAX_PERF_ROWS` / `API_MAX_PNL_ROWS` /
-  `API_MAX_POSITION_ROWS`: per-dataset fetch caps (set `0` to disable a cap)
-- `API_PREFLIGHT_STRICT`: whether startup should fail when the backend API is
-  unavailable (`false` by default)
-- `LOG_DIR`: directory for dashboard log files (`logs` by default)
-- `LOG_FILE`: active dashboard log filename (`dashboard.log` by default)
-- `LOG_LEVEL`: minimum log level (`DEBUG`, `INFO`, `WARNING`, or `ERROR`)
-- `LOG_RETENTION_DAYS`: number of days to retain rotated `dashboard.log.YYYY-MM-DD`
-  files (`7` by default)
-- `TZ`: local timezone used in log timestamps and daily log filenames, for
-  example `America/New_York`
-
-### 3. Run
-
-```bash
-# default Next.js development port 3000
-quant-web
-
-# custom port
-quant-web --port 3001
-```
-
-Production mode after a build:
-
-```bash
-npm run build
-quant-web start --port 3000
-```
-
-### 4. Quality Checks
+Run both checks before submitting changes:
 
 ```bash
 npm run lint
 npm run build
 ```
 
-## Scripts
-
-- `npm run dev`: start the Next.js development server
-- `npm run build`: create a production build
-- `npm run start`: start the production server after build
-- `npm run lint`: run ESLint
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Release history is maintained in [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 
