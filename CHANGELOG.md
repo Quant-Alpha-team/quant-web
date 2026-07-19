@@ -1,3 +1,9 @@
+## v0.6.3 (2026-07-19)
+
+### Fix
+
+- **dashboard**: improve table sorting and responsive layout
+
 ## v0.6.2 (2026-07-18)
 
 ### Fix
