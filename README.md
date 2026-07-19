@@ -155,4 +155,4 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 ---
 
-**Version**: 0.6.1
+**Version**: 0.6.2

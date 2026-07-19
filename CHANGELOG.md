@@ -1,3 +1,9 @@
+## v0.6.2 (2026-07-18)
+
+### Fix
+
+- **dashboard**: sync holdings expand and collapse control state
+
 ## v0.6.1 (2026-07-18)
 
 ### Fix
