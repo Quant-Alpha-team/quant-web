@@ -340,7 +340,7 @@ export function formatTimestamp(value: string | undefined, timeZone: string) {
   if (Number.isNaN(parsed.getTime())) {
     return value;
   }
-  return new Intl.DateTimeFormat("en-CA", {
+  const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
     month: "2-digit",
@@ -348,8 +348,12 @@ export function formatTimestamp(value: string | undefined, timeZone: string) {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-    hour12: false,
-  }).format(parsed);
+    hourCycle: "h23",
+  }).formatToParts(parsed);
+  const valueByPart = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
+  return `${valueByPart.year}-${valueByPart.month}-${valueByPart.day} ${valueByPart.hour}:${valueByPart.minute}:${valueByPart.second}`;
 }
 
 export function downsample<T>(rows: T[], maxPoints: number) {

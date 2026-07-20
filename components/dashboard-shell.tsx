@@ -1082,7 +1082,7 @@ function equitySnapshotTime(value: string | undefined, timezone: string) {
     return "—";
   }
   const formatted = formatTimestamp(value, timezone);
-  return formatted.split(", ").at(-1) ?? formatted;
+  return formatted.split(" ").at(-1) ?? formatted;
 }
 
 function AccountEquityPanel({
