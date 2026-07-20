@@ -1,3 +1,9 @@
+## v0.6.5 (2026-07-20)
+
+### Fix
+
+- **dashboard**: use realized P&L for realized KPI
+
 ## v0.6.4 (2026-07-20)
 
 ### Fix
