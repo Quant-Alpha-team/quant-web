@@ -181,10 +181,11 @@ function OverviewPanel({
     data.pnlRows,
     data.positionRows,
   );
-  const periodValue = kpi.periodPnl;
-  const periodDetail = periodValue !== null
-    ? `${kpi.periodPnlRecords} recorded${kpi.periodPnlPendingRecords > 0 ? ` · ${kpi.periodPnlPendingRecords} without baseline` : ""}`
-    : "No completed P&L baseline";
+  const realizedValue = kpi.periodRealizedPnl;
+  const realizedDetail =
+    realizedValue !== null
+      ? `${kpi.periodRealizedRecords} daily realized record${kpi.periodRealizedRecords === 1 ? "" : "s"}`
+      : "No realized P&L records";
   const navDetail =
     kpi.navChange === null || kpi.navChangePercent === null
       ? "One NAV close in selected range"
@@ -206,10 +207,10 @@ function OverviewPanel({
         <div className="lg:col-span-2">
           <MetricCard
             label="Total Realized P&L"
-            value={periodValue === null ? "Unavailable" : formatCurrency(periodValue)}
-            delta={periodDetail}
-            tone={metricTone(periodValue)}
-            deltaTone={metricTone(periodValue)}
+            value={realizedValue === null ? "Unavailable" : formatCurrency(realizedValue)}
+            delta={realizedDetail}
+            tone={metricTone(realizedValue)}
+            deltaTone={metricTone(realizedValue)}
           />
         </div>
         <div className="lg:col-span-2">

@@ -127,10 +127,9 @@ export type KpiCards = {
   navChange: number | null;
   navChangePercent: number | null;
   openPnl: number | null;
-  periodPnl: number | null;
+  periodRealizedPnl: number | null;
   totalCommission: number;
-  periodPnlRecords: number;
-  periodPnlPendingRecords: number;
+  periodRealizedRecords: number;
   totalTrades: number;
   openPositions: number;
   openStrategies: number;

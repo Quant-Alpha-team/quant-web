@@ -221,13 +221,12 @@ export function computeKpis(
     navChange: null,
     navChangePercent: null,
     openPnl: null,
-    periodPnl: null,
+    periodRealizedPnl: null,
     totalCommission: execRows.reduce(
       (total, row) => total + toNumber(row.commission),
       0,
     ),
-    periodPnlRecords: 0,
-    periodPnlPendingRecords: 0,
+    periodRealizedRecords: 0,
     totalTrades: execRows.length,
     openPositions: positionRows.length,
     openStrategies: new Set(
@@ -268,14 +267,13 @@ export function computeKpis(
       firstNav !== 0 ? ((lastNav - firstNav) / firstNav) * 100 : null;
   }
 
-  const recordedPnlRows = pnlRows.filter(
-    (row) => optionalNumber(row.daily_pnl) !== null,
+  const recordedRealizedRows = pnlRows.filter(
+    (row) => optionalNumber(row.realized_pnl) !== null,
   );
-  kpi.periodPnlRecords = recordedPnlRows.length;
-  kpi.periodPnlPendingRecords = pnlRows.length - recordedPnlRows.length;
-  if (recordedPnlRows.length > 0) {
-    kpi.periodPnl = recordedPnlRows.reduce(
-      (total, row) => total + toNumber(row.daily_pnl),
+  kpi.periodRealizedRecords = recordedRealizedRows.length;
+  if (recordedRealizedRows.length > 0) {
+    kpi.periodRealizedPnl = recordedRealizedRows.reduce(
+      (total, row) => total + toNumber(row.realized_pnl),
       0,
     );
   }
