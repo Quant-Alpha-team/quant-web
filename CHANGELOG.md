@@ -1,3 +1,9 @@
+## v0.6.4 (2026-07-20)
+
+### Fix
+
+- **dashboard**: remove comma from formatted timestamps
+
 ## v0.6.3 (2026-07-19)
 
 ### Fix
