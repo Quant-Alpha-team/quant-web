@@ -1,3 +1,9 @@
+## v0.6.6 (2026-07-22)
+
+### Fix
+
+- **dashboard**: show zero for missing realized P&L values
+
 ## v0.6.5 (2026-07-20)
 
 ### Fix
