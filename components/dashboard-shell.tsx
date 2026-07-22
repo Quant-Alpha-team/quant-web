@@ -207,7 +207,7 @@ function OverviewPanel({
         <div className="lg:col-span-2">
           <MetricCard
             label="Total Realized P&L"
-            value={realizedValue === null ? "Unavailable" : formatCurrency(realizedValue)}
+            value={formatCurrency(realizedValue ?? 0)}
             delta={realizedDetail}
             tone={metricTone(realizedValue)}
             deltaTone={metricTone(realizedValue)}
