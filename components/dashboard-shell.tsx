@@ -198,6 +198,17 @@ function OverviewPanel({
     kpi.navChange === null || kpi.navChangePercent === null
       ? "One NAV close in selected range"
       : `${formatSignedCurrency(kpi.navChange)} (${formatSignedPercent(kpi.navChangePercent)})`;
+  const tradedStrategies = new Set(
+    data.execRows.map((row) => row.strategy_name ?? "Unattributed"),
+  ).size;
+  const tradesDetail =
+    kpi.totalTrades === 0
+      ? "No executions in selected range"
+      : `${tradedStrategies} ${tradedStrategies === 1 ? "strategy" : "strategies"} in selected range`;
+  const commissionDetail =
+    kpi.totalTrades === 0
+      ? "No commission in selected range"
+      : `${formatCurrency(Math.abs(kpi.totalCommission) / kpi.totalTrades)} average per trade`;
 
   return (
     <Panel title={`Portfolio Overview: ${strategy} (${accountId})`}>
@@ -241,6 +252,7 @@ function OverviewPanel({
           <MetricCard
             label="Total Trades"
             value={String(kpi.totalTrades)}
+            delta={tradesDetail}
             tone="neutral"
           />
         </div>
@@ -256,6 +268,7 @@ function OverviewPanel({
           <MetricCard
             label="Total Commission"
             value={formatCurrency(kpi.totalCommission)}
+            delta={commissionDetail}
             tone="neutral"
           />
         </div>
