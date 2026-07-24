@@ -271,4 +271,4 @@ Release history is maintained in [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 
-**Version**: 0.6.6
+**Version**: 0.6.7

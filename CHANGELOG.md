@@ -1,3 +1,10 @@
+## v0.6.7 (2026-07-24)
+
+### Fix
+
+- **dashboard**: add context to trade KPI cards
+- **dashboard**: improve resizable table column behavior
+
 ## v0.6.6 (2026-07-22)
 
 ### Fix
