@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   AlertTriangle,
   ArrowUpDown,
@@ -578,21 +586,37 @@ type PositionSortState = {
   direction: "asc" | "desc";
 };
 
+type PositionColumnKey =
+  | "symbol"
+  | "description"
+  | "quantity"
+  | "price"
+  | "marketValue"
+  | "costBasis"
+  | "dayChange"
+  | "profitLoss"
+  | "profitLossPercent"
+  | "expiration";
+
+type PositionColumnWidths = Record<PositionColumnKey, number>;
+
 const positionTableColumns: Array<{
+  key: PositionColumnKey;
   label: string;
   align: "left" | "right";
+  minWidth: number;
   sortKey?: PositionSortKey;
 }> = [
-  { label: "Symbol", align: "left" },
-  { label: "Description", align: "left" },
-  { label: "Qty", align: "right", sortKey: "quantity" },
-  { label: "Price", align: "right", sortKey: "mark_price" },
-  { label: "Mkt Val", align: "right", sortKey: "market_value" },
-  { label: "Cost Basis", align: "right", sortKey: "cost_basis" },
-  { label: "P/L Day", align: "right", sortKey: "day_change" },
-  { label: "P/L", align: "right", sortKey: "unrealized_pnl" },
-  { label: "P/L %", align: "right", sortKey: "gain_loss_percent" },
-  { label: "Exp/Mat", align: "left", sortKey: "expiry_date" },
+  { key: "symbol", label: "Symbol", align: "left", minWidth: 96 },
+  { key: "description", label: "Description", align: "left", minWidth: 140 },
+  { key: "quantity", label: "Qty", align: "right", minWidth: 72, sortKey: "quantity" },
+  { key: "price", label: "Price", align: "right", minWidth: 88, sortKey: "mark_price" },
+  { key: "marketValue", label: "Mkt Val", align: "right", minWidth: 104, sortKey: "market_value" },
+  { key: "costBasis", label: "Cost Basis", align: "right", minWidth: 104, sortKey: "cost_basis" },
+  { key: "dayChange", label: "P/L Day", align: "right", minWidth: 112, sortKey: "day_change" },
+  { key: "profitLoss", label: "P/L", align: "right", minWidth: 104, sortKey: "unrealized_pnl" },
+  { key: "profitLossPercent", label: "P/L %", align: "right", minWidth: 92, sortKey: "gain_loss_percent" },
+  { key: "expiration", label: "Exp/Mat", align: "left", minWidth: 112, sortKey: "expiry_date" },
 ];
 
 function sortPositionRows(rows: StrategyPosition[], sort: PositionSortState | null) {
@@ -683,9 +707,258 @@ function StrategyPositionsPanel({
   const [positionSortByStrategy, setPositionSortByStrategy] = useState<
     Record<string, PositionSortState | null>
   >({});
+  const [positionColumnWidthsByStrategy, setPositionColumnWidthsByStrategy] =
+    useState<Record<string, PositionColumnWidths>>({});
+  const [positionMinimumTableWidthByStrategy, setPositionMinimumTableWidthByStrategy] =
+    useState<Record<string, number>>({});
+  const [resizingPositionColumn, setResizingPositionColumn] = useState<{
+    strategyName: string;
+    key: PositionColumnKey;
+  } | null>(null);
+  const positionColumnResize = useRef<{
+    strategyName: string;
+    key: PositionColumnKey;
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+    minimumTableWidth: number;
+    widths: PositionColumnWidths;
+  } | null>(null);
   const allStrategiesCollapsed =
     strategyGroups.length > 0 &&
     strategyGroups.every(([strategyName]) => collapsedStrategies.has(strategyName));
+  function measurePositionColumnWidths(
+    resizeHandle: HTMLButtonElement,
+  ): PositionColumnWidths | null {
+    const table = resizeHandle.closest("table");
+    if (!table) {
+      return null;
+    }
+
+    const measured = {} as PositionColumnWidths;
+    for (const column of positionTableColumns) {
+      const cell = table.querySelector<HTMLElement>(
+        `th[data-position-column="${column.key}"]`,
+      );
+      if (!cell) {
+        return null;
+      }
+      measured[column.key] = Math.max(
+        column.minWidth,
+        Math.round(cell.getBoundingClientRect().width),
+      );
+    }
+    return measured;
+  }
+
+  function totalPositionColumnWidth(widths: PositionColumnWidths) {
+    return positionTableColumns.reduce(
+      (total, column) => total + widths[column.key],
+      0,
+    );
+  }
+
+  function fillMinimumPositionTableWidth(
+    widths: PositionColumnWidths,
+    requiredWidth: number,
+  ) {
+    const deficit = requiredWidth - totalPositionColumnWidth(widths);
+    const fillColumn = positionTableColumns.at(-1);
+    if (deficit <= 0 || !fillColumn) {
+      return widths;
+    }
+    return {
+      ...widths,
+      [fillColumn.key]: widths[fillColumn.key] + deficit,
+    };
+  }
+
+  function constrainedPositionColumnWidths(
+    widths: PositionColumnWidths,
+    key: PositionColumnKey,
+    requestedWidth: number,
+    requiredWidth: number,
+  ) {
+    const columnIndex = positionTableColumns.findIndex(
+      (column) => column.key === key,
+    );
+    const column = positionTableColumns[columnIndex];
+    if (!column) {
+      return widths;
+    }
+
+    const startWidth = widths[key];
+    const nextWidth = Math.max(column.minWidth, Math.round(requestedWidth));
+    const delta = nextWidth - startWidth;
+    const nextWidths = { ...widths, [key]: nextWidth };
+    const neighbor = positionTableColumns[columnIndex + 1];
+
+    if (delta > 0 && neighbor) {
+      const neighborCapacity = Math.max(
+        0,
+        widths[neighbor.key] - neighbor.minWidth,
+      );
+      nextWidths[neighbor.key] =
+        widths[neighbor.key] - Math.min(delta, neighborCapacity);
+    } else if (delta < 0) {
+      const tableShrinkCapacity = Math.max(
+        0,
+        totalPositionColumnWidth(widths) - requiredWidth,
+      );
+      const widthForNeighbor = Math.max(
+        0,
+        -delta - tableShrinkCapacity,
+      );
+      if (widthForNeighbor > 0) {
+        if (neighbor) {
+          nextWidths[neighbor.key] = widths[neighbor.key] + widthForNeighbor;
+        } else {
+          nextWidths[key] += widthForNeighbor;
+        }
+      }
+    }
+
+    return nextWidths;
+  }
+
+  function positionResizeMinimumWidth(
+    resizeHandle: HTMLButtonElement,
+    strategyName: string,
+    widths: PositionColumnWidths,
+  ) {
+    const viewportWidth =
+      resizeHandle.closest("table")?.parentElement?.clientWidth ?? 0;
+    return Math.max(
+      positionMinimumTableWidthByStrategy[strategyName] ??
+        totalPositionColumnWidth(widths),
+      viewportWidth,
+    );
+  }
+
+  function startPositionColumnResize(
+    event: ReactPointerEvent<HTMLButtonElement>,
+    strategyName: string,
+    key: PositionColumnKey,
+  ) {
+    if (event.button !== 0) {
+      return;
+    }
+
+    const measuredWidths =
+      positionColumnWidthsByStrategy[strategyName] ??
+      measurePositionColumnWidths(event.currentTarget);
+    if (!measuredWidths) {
+      return;
+    }
+    const requiredWidth = positionResizeMinimumWidth(
+      event.currentTarget,
+      strategyName,
+      measuredWidths,
+    );
+    const widths = fillMinimumPositionTableWidth(
+      measuredWidths,
+      requiredWidth,
+    );
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    positionColumnResize.current = {
+      strategyName,
+      key,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: widths[key],
+      minimumTableWidth: requiredWidth,
+      widths,
+    };
+    setPositionMinimumTableWidthByStrategy((current) => ({
+      ...current,
+      [strategyName]: requiredWidth,
+    }));
+    setPositionColumnWidthsByStrategy((current) => ({
+      ...current,
+      [strategyName]: widths,
+    }));
+    setResizingPositionColumn({ strategyName, key });
+  }
+
+  function movePositionColumnResize(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) {
+    const resize = positionColumnResize.current;
+    if (!resize || resize.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    setPositionColumnWidthsByStrategy((current) => ({
+      ...current,
+      [resize.strategyName]: constrainedPositionColumnWidths(
+        resize.widths,
+        resize.key,
+        resize.startWidth + event.clientX - resize.startX,
+        resize.minimumTableWidth,
+      ),
+    }));
+  }
+
+  function finishPositionColumnResize(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) {
+    if (positionColumnResize.current?.pointerId !== event.pointerId) {
+      return;
+    }
+    positionColumnResize.current = null;
+    setResizingPositionColumn(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function resizePositionColumnWithKeyboard(
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    strategyName: string,
+    key: PositionColumnKey,
+  ) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      return;
+    }
+
+    const measuredWidths =
+      positionColumnWidthsByStrategy[strategyName] ??
+      measurePositionColumnWidths(event.currentTarget);
+    if (!measuredWidths) {
+      return;
+    }
+    const requiredWidth = positionResizeMinimumWidth(
+      event.currentTarget,
+      strategyName,
+      measuredWidths,
+    );
+    const widths = fillMinimumPositionTableWidth(
+      measuredWidths,
+      requiredWidth,
+    );
+
+    event.preventDefault();
+    event.stopPropagation();
+    const delta =
+      (event.shiftKey ? 40 : 12) * (event.key === "ArrowRight" ? 1 : -1);
+    setPositionMinimumTableWidthByStrategy((current) => ({
+      ...current,
+      [strategyName]: requiredWidth,
+    }));
+    setPositionColumnWidthsByStrategy((current) => ({
+      ...current,
+      [strategyName]: constrainedPositionColumnWidths(
+        widths,
+        key,
+        widths[key] + delta,
+        requiredWidth,
+      ),
+    }));
+  }
 
   function toggleStrategy(strategyName: string) {
     setCollapsedStrategies((current) => {
@@ -815,6 +1088,14 @@ function StrategyPositionsPanel({
             ).length;
             const isCollapsed = collapsedStrategies.has(strategyName);
             const positionSort = positionSortByStrategy[strategyName] ?? null;
+            const positionColumnWidths =
+              positionColumnWidthsByStrategy[strategyName] ?? null;
+            const positionTableWidth = positionColumnWidths
+              ? positionTableColumns.reduce(
+                  (total, column) => total + positionColumnWidths[column.key],
+                  0,
+                )
+              : null;
             const assetMap = new Map<string, { label: string; rows: StrategyPosition[] }>();
             for (const row of strategyRows) {
               const asset = positionAssetGroup(row.sec_type);
@@ -931,13 +1212,39 @@ function StrategyPositionsPanel({
                         </span>
                       </div>
                       <div className="max-h-[620px] overflow-auto">
-                        <table className="w-full min-w-[1160px] table-fixed border-collapse text-[12px]">
+                        <table
+                          className={
+                            "table-fixed border-collapse text-[12px] " +
+                            (positionColumnWidths ? "" : "w-full min-w-[1160px]")
+                          }
+                          style={
+                            positionTableWidth === null
+                              ? undefined
+                              : {
+                                  width: `${positionTableWidth}px`,
+                                  minWidth: `${positionTableWidth}px`,
+                                }
+                          }
+                        >
+                          <colgroup>
+                            {positionTableColumns.map((column) => (
+                              <col
+                                key={column.key}
+                                style={
+                                  positionColumnWidths
+                                    ? { width: `${positionColumnWidths[column.key]}px` }
+                                    : undefined
+                                }
+                              />
+                            ))}
+                          </colgroup>
                           <thead className="sticky top-0 z-20 bg-[#173451] text-[10px] uppercase tracking-wide text-[#b7ccd8]">
                             <tr>
                               {positionTableColumns.map(
-                                ({ label, align, sortKey }) => (
+                                ({ key: columnKey, label, align, sortKey }, columnIndex) => (
                                   <th
-                                    key={label}
+                                    key={columnKey}
+                                    data-position-column={columnKey}
                                     aria-sort={
                                       sortKey
                                         ? positionSort?.key === sortKey
@@ -948,13 +1255,24 @@ function StrategyPositionsPanel({
                                         : undefined
                                     }
                                     className={
-                                      "whitespace-nowrap border-b border-white/[0.12] px-3 py-3 font-semibold " +
+                                      "overflow-hidden whitespace-nowrap border-b border-white/[0.12] px-3 py-3 font-semibold " +
                                       (align === "right" ? "text-right" : "text-left") +
                                       (label === "Symbol"
-                                        ? " sticky left-0 z-30 w-[8%] bg-[#173451]"
+                                        ? " sticky left-0 z-40 bg-[#173451]" +
+                                          (positionColumnWidths ? "" : " w-[8%]")
                                         : label === "Description"
-                                          ? " sticky left-[8%] z-30 w-[12%] bg-[#173451] shadow-[8px_0_16px_rgba(0,7,20,0.24)]"
-                                          : "")
+                                          ? " sticky z-40 bg-[#173451] shadow-[8px_0_16px_rgba(0,7,20,0.24)]" +
+                                            (positionColumnWidths ? "" : " w-[12%]")
+                                          : " relative z-0")
+                                    }
+                                    style={
+                                      label === "Description"
+                                        ? {
+                                            left: positionColumnWidths
+                                              ? `${positionColumnWidths.symbol}px`
+                                              : "8%",
+                                          }
+                                        : undefined
                                     }
                                   >
                                     {sortKey ? (
@@ -962,7 +1280,7 @@ function StrategyPositionsPanel({
                                         type="button"
                                         onClick={() => togglePositionSort(strategyName, sortKey)}
                                         className={
-                                          "inline-flex w-full cursor-pointer items-center gap-1.5 rounded-sm transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 " +
+                                          "inline-flex w-full min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden rounded-sm pr-2 transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 " +
                                           (align === "right"
                                             ? "justify-end"
                                             : "justify-start")
@@ -975,29 +1293,74 @@ function StrategyPositionsPanel({
                                             : `Sort ${label} ascending`
                                         }
                                       >
-                                        <span>{label}</span>
+                                        <span className="min-w-0 truncate">{label}</span>
                                         {positionSort?.key === sortKey ? (
                                           positionSort.direction === "asc" ? (
                                             <ChevronUp
-                                              className="h-3.5 w-3.5 text-cyan-300"
+                                              className="h-3.5 w-3.5 shrink-0 text-cyan-300"
                                               aria-hidden="true"
                                             />
                                           ) : (
                                             <ChevronDown
-                                              className="h-3.5 w-3.5 text-cyan-300"
+                                              className="h-3.5 w-3.5 shrink-0 text-cyan-300"
                                               aria-hidden="true"
                                             />
                                           )
                                         ) : (
                                           <ArrowUpDown
-                                            className="h-3.5 w-3.5 opacity-50"
+                                            className="h-3.5 w-3.5 shrink-0 opacity-50"
                                             aria-hidden="true"
                                           />
                                         )}
                                       </button>
                                     ) : (
-                                      label
+                                      <span className="block truncate pr-2">{label}</span>
                                     )}
+                                    {columnIndex < positionTableColumns.length - 1 ? (
+                                      <button
+                                        type="button"
+                                        aria-label={`Resize ${label} column. Drag, or use the left and right arrow keys.`}
+                                      title={`Resize ${label} column`}
+                                      onPointerDown={(event) =>
+                                        startPositionColumnResize(
+                                          event,
+                                          strategyName,
+                                          columnKey,
+                                        )
+                                      }
+                                      onPointerMove={movePositionColumnResize}
+                                      onPointerUp={finishPositionColumnResize}
+                                      onPointerCancel={finishPositionColumnResize}
+                                      onLostPointerCapture={(event) => {
+                                        if (
+                                          positionColumnResize.current?.pointerId ===
+                                          event.pointerId
+                                        ) {
+                                          positionColumnResize.current = null;
+                                          setResizingPositionColumn(null);
+                                        }
+                                      }}
+                                      onKeyDown={(event) =>
+                                        resizePositionColumnWithKeyboard(
+                                          event,
+                                          strategyName,
+                                          columnKey,
+                                        )
+                                      }
+                                      className="group/resize absolute right-0 top-0 z-10 flex h-full w-2 cursor-col-resize touch-none select-none items-center justify-end focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-300"
+                                    >
+                                      <span
+                                        className={
+                                          "h-3/5 w-px transition-colors " +
+                                          (resizingPositionColumn?.strategyName ===
+                                            strategyName &&
+                                          resizingPositionColumn.key === columnKey
+                                            ? "bg-cyan-300"
+                                            : "bg-white/20 group-hover/resize:bg-cyan-300/80")
+                                        }
+                                      />
+                                      </button>
+                                    ) : null}
                                   </th>
                                 ),
                               )}
@@ -1008,9 +1371,14 @@ function StrategyPositionsPanel({
                               (row, rowIndex) => (
                               <tr
                                 key={(row.broker_account_id ?? "") + "-" + positionInstrumentLabel(row) + "-" + rowIndex}
-                                className="group border-b border-white/[0.065] bg-white/[0.015] transition hover:bg-cyan-300/[0.055]"
+                                className="group border-b border-white/[0.065] bg-white/[0.015] transition hover:bg-cyan-300/[0.055] [&>td]:overflow-hidden"
                               >
-                                <td className="sticky left-0 z-10 w-[8%] whitespace-nowrap bg-[#0d2c47] px-3 py-3 align-top transition group-hover:bg-[#123a59]">
+                                <td
+                                  className={
+                                    "sticky left-0 z-10 whitespace-nowrap bg-[#0d2c47] px-3 py-3 align-top transition group-hover:bg-[#123a59]" +
+                                    (positionColumnWidths ? "" : " w-[8%]")
+                                  }
+                                >
                                   <div
                                     className="truncate font-mono text-sm font-bold text-cyan-300"
                                     title={positionInstrumentLabel(row)}
@@ -1021,7 +1389,17 @@ function StrategyPositionsPanel({
                                     {row.sec_type ?? "—"} · {row.currency ?? "USD"}
                                   </div>
                                 </td>
-                                <td className="sticky left-[8%] z-10 w-[12%] bg-[#0d2c47] px-3 py-3 align-top shadow-[8px_0_16px_rgba(0,7,20,0.24)] transition group-hover:bg-[#123a59]">
+                                <td
+                                  className={
+                                    "sticky z-10 bg-[#0d2c47] px-3 py-3 align-top shadow-[8px_0_16px_rgba(0,7,20,0.24)] transition group-hover:bg-[#123a59]" +
+                                    (positionColumnWidths ? "" : " w-[12%]")
+                                  }
+                                  style={{
+                                    left: positionColumnWidths
+                                      ? `${positionColumnWidths.symbol}px`
+                                      : "8%",
+                                  }}
+                                >
                                   <div
                                     className="truncate font-medium text-[var(--foreground)]"
                                     title={positionDescription(row)}
