@@ -1,3 +1,9 @@
+## v0.6.8 (2026-07-29)
+
+### Fix
+
+- **dashboard**: group strategies by family and version
+
 ## v0.6.7 (2026-07-24)
 
 ### Fix
