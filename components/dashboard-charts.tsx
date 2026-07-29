@@ -19,6 +19,7 @@ import {
   downsample,
   formatCurrency,
   formatDate,
+  strategyFamily,
   toNumber,
 } from "@/lib/dashboard";
 import type { AccountEquity, StrategyDailyPnl } from "@/lib/types";
@@ -174,11 +175,8 @@ export function PnlBarChart({ rows }: { rows: StrategyDailyPnl[] }) {
       continue;
     }
     const pnl = toNumber(row.daily_pnl);
-    if (Math.abs(pnl) < minimumVisiblePnl) {
-      continue;
-    }
     const date = formatDate(row.date);
-    const strategy = row.strategy_name || "Unknown";
+    const strategy = strategyFamily(row);
     const entry = byDate.get(date) ?? { date };
     entry[strategy] = toNumber(entry[strategy]) + pnl;
     byDate.set(date, entry);

@@ -1,6 +1,7 @@
 import type {
   AccountEquity,
   FilterOptions,
+  StrategyFamilyOption,
   StrategyDailyPnl,
   StrategyPosition,
   TradeExecution,
@@ -182,19 +183,117 @@ async function fetchAllPages<T>(
 }
 
 function scopeParams(
-  strategy: string,
+  strategyFamily: string,
+  strategyVersion: string,
   accountId: string,
   startDate: string,
   endDate: string,
   timezone: string,
 ) {
   return {
-    strategy,
+    strategy_family: strategyFamily,
+    strategy_version: strategyVersion,
     account_id: accountId,
     start_date: startDate,
     end_date: endDate,
     tz: timezone,
   };
+}
+
+function strategyIdentityFromName(strategyName: string) {
+  const match = strategyName.match(/^(.*)_(V\d+)$/i);
+  return match
+    ? { family: match[1], version: match[2].toUpperCase() }
+    : { family: strategyName, version: null };
+}
+
+function legacyStrategyFamilies(strategies: string[]): StrategyFamilyOption[] {
+  const byFamily = new Map<string, StrategyFamilyOption>();
+
+  for (const strategyName of strategies) {
+    const identity = strategyIdentityFromName(strategyName);
+    const entry = byFamily.get(identity.family) ?? {
+      family: identity.family,
+      versions: [],
+    };
+    entry.versions.push({
+      version: identity.version,
+      strategy_name: strategyName,
+      is_active: true,
+    });
+    byFamily.set(identity.family, entry);
+  }
+
+  return [...byFamily.values()]
+    .map((entry) => ({
+      ...entry,
+      versions: entry.versions.sort((left, right) =>
+        (left.version ?? "").localeCompare(right.version ?? "", undefined, {
+          numeric: true,
+        }),
+      ),
+    }))
+    .sort((left, right) => left.family.localeCompare(right.family));
+}
+
+function normalizeStrategyFamilies(
+  value: unknown,
+  strategies: string[],
+): StrategyFamilyOption[] {
+  if (!Array.isArray(value)) {
+    return legacyStrategyFamilies(strategies);
+  }
+
+  const families: StrategyFamilyOption[] = [];
+  for (const rawFamily of value) {
+    if (!rawFamily || typeof rawFamily !== "object") {
+      continue;
+    }
+    const familyRecord = rawFamily as Record<string, unknown>;
+    const family =
+      typeof familyRecord.family === "string" ? familyRecord.family.trim() : "";
+    if (!family || !Array.isArray(familyRecord.versions)) {
+      continue;
+    }
+
+    const versions = familyRecord.versions.flatMap((rawVersion) => {
+      if (!rawVersion || typeof rawVersion !== "object") {
+        return [];
+      }
+      const versionRecord = rawVersion as Record<string, unknown>;
+      const strategyName =
+        typeof versionRecord.strategy_name === "string"
+          ? versionRecord.strategy_name.trim()
+          : "";
+      const version =
+        versionRecord.version === null
+          ? null
+          : typeof versionRecord.version === "string" &&
+              versionRecord.version.trim()
+            ? versionRecord.version.trim()
+            : undefined;
+      if (!strategyName || version === undefined) {
+        return [];
+      }
+      return [
+        {
+          version,
+          strategy_name: strategyName,
+          is_active:
+            typeof versionRecord.is_active === "boolean"
+              ? versionRecord.is_active
+              : true,
+        },
+      ];
+    });
+    if (versions.length > 0) {
+      families.push({ family, versions });
+    }
+  }
+
+  return families.length > 0 || strategies.length === 0
+    ? families
+    : legacyStrategyFamilies(strategies);
 }
 
 export async function pingBackend() {
@@ -211,7 +310,17 @@ export async function getFilters(): Promise<FilterOptions> {
   if (!Array.isArray(strategies) || !Array.isArray(accounts)) {
     throw new BackendApiError("Unexpected response format from filters API.");
   }
-  return { strategies, accounts };
+  const normalizedStrategies = strategies.filter(
+    (strategy): strategy is string => typeof strategy === "string" && Boolean(strategy.trim()),
+  );
+  return {
+    strategies: normalizedStrategies,
+    strategy_families: normalizeStrategyFamilies(
+      data?.strategy_families,
+      normalizedStrategies,
+    ),
+    accounts,
+  };
 }
 
 export type ReconciliationSyncResult = {
@@ -235,7 +344,8 @@ export async function syncTradingData(): Promise<ReconciliationSyncResult> {
 }
 
 export async function getTradeExecutions(params: {
-  strategy: string;
+  strategyFamily: string;
+  strategyVersion: string;
   accountId: string;
   startDate: string;
   endDate: string;
@@ -245,7 +355,8 @@ export async function getTradeExecutions(params: {
     "/api/trading/trades/executions/",
     {
       ...scopeParams(
-        params.strategy,
+        params.strategyFamily,
+        params.strategyVersion,
         params.accountId,
         params.startDate,
         params.endDate,
@@ -266,13 +377,10 @@ export async function getAccountEquityHistory(params: {
   return fetchAllPages<AccountEquity>(
     "/api/trading/accounts/equity-history/",
     {
-      ...scopeParams(
-        "ALL",
-        params.accountId,
-        params.startDate,
-        params.endDate,
-        params.timezone,
-      ),
+      account_id: params.accountId,
+      start_date: params.startDate,
+      end_date: params.endDate,
+      tz: params.timezone,
       order: "asc",
     },
     apiConfig.maxPerfRows,
@@ -280,7 +388,8 @@ export async function getAccountEquityHistory(params: {
 }
 
 export async function getStrategyDailyPnl(params: {
-  strategy: string;
+  strategyFamily: string;
+  strategyVersion: string;
   accountId: string;
   startDate: string;
   endDate: string;
@@ -290,7 +399,8 @@ export async function getStrategyDailyPnl(params: {
     "/api/trading/strategies/daily-pnl/",
     {
       ...scopeParams(
-        params.strategy,
+        params.strategyFamily,
+        params.strategyVersion,
         params.accountId,
         params.startDate,
         params.endDate,
@@ -303,7 +413,8 @@ export async function getStrategyDailyPnl(params: {
 }
 
 export async function getStrategyPositions(params: {
-  strategy: string;
+  strategyFamily: string;
+  strategyVersion: string;
   accountId: string;
   endDate: string;
   timezone: string;
@@ -311,7 +422,8 @@ export async function getStrategyPositions(params: {
   return fetchAllPages<StrategyPosition>(
     "/api/trading/portfolio/positions/",
     {
-      strategy: params.strategy,
+      strategy_family: params.strategyFamily,
+      strategy_version: params.strategyVersion,
       account_id: params.accountId,
       as_of_date: params.endDate,
       tz: params.timezone,
@@ -320,4 +432,3 @@ export async function getStrategyPositions(params: {
     apiConfig.maxPositionRows,
   );
 }
-

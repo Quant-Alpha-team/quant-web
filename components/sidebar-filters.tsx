@@ -4,6 +4,7 @@ import Image from "next/image";
 import {
   CalendarDays,
   Clock3,
+  GitBranch,
   Layers3,
   PanelLeftClose,
   PanelLeftOpen,
@@ -49,13 +50,15 @@ const toggleButtonClass =
 export function SidebarFilters({
   collapsed,
   filters,
-  strategy,
+  strategyFamily,
+  strategyVersion,
   accountId,
   datePreset,
   timezone,
   customStart,
   customEnd,
-  onStrategyChange,
+  onStrategyFamilyChange,
+  onStrategyVersionChange,
   onAccountChange,
   onPresetChange,
   onTimezoneChange,
@@ -65,13 +68,15 @@ export function SidebarFilters({
 }: {
   collapsed: boolean;
   filters: FilterOptions;
-  strategy: string;
+  strategyFamily: string;
+  strategyVersion: string;
   accountId: string;
   datePreset: DatePreset;
   timezone: string;
   customStart: string;
   customEnd: string;
-  onStrategyChange: (value: string) => void;
+  onStrategyFamilyChange: (value: string) => void;
+  onStrategyVersionChange: (value: string) => void;
   onAccountChange: (value: string) => void;
   onPresetChange: (value: DatePreset) => void;
   onTimezoneChange: (value: string) => void;
@@ -82,6 +87,17 @@ export function SidebarFilters({
   const range = resolveDateRange(datePreset, timezone, customStart, customEnd);
   const today = todayInTimeZone(timezone);
   const ToggleIcon = collapsed ? PanelLeftOpen : PanelLeftClose;
+  const selectedFamily = filters.strategy_families.find(
+    (item) => item.family === strategyFamily,
+  );
+  const versionOptions =
+    selectedFamily?.versions.filter(
+      (item): item is typeof item & { version: string } => item.version !== null,
+    ) ?? [];
+  const hasVersions = versionOptions.length > 0;
+  const versionDisabled = strategyFamily === "ALL" || !hasVersions;
+  const versionValue =
+    strategyFamily === "ALL" ? "ALL" : hasVersions ? strategyVersion : "N/A";
 
   if (collapsed) {
     return (
@@ -165,15 +181,39 @@ export function SidebarFilters({
         <Field icon={Layers3} label="Strategy" tone="violet">
           <select
             className={inputClass}
-            value={strategy}
-            onChange={(event) => onStrategyChange(event.target.value)}
+            value={strategyFamily}
+            onChange={(event) => onStrategyFamilyChange(event.target.value)}
           >
             <option value="ALL">ALL</option>
-            {filters.strategies.map((item) => (
-              <option key={item} value={item}>
-                {item}
+            {filters.strategy_families.map((item) => (
+              <option key={item.family} value={item.family}>
+                {item.family}
               </option>
             ))}
+          </select>
+        </Field>
+
+        <Field icon={GitBranch} label="Version" tone="violet">
+          <select
+            className={`${inputClass} disabled:cursor-not-allowed disabled:opacity-55`}
+            value={versionValue}
+            disabled={versionDisabled}
+            onChange={(event) => onStrategyVersionChange(event.target.value)}
+          >
+            {strategyFamily === "ALL" ? (
+              <option value="ALL">ALL VERSIONS</option>
+            ) : !hasVersions ? (
+              <option value="N/A">N/A</option>
+            ) : (
+              <>
+                <option value="ALL">ALL VERSIONS</option>
+                {versionOptions.map((item) => (
+                  <option key={item.strategy_name} value={item.version}>
+                    {item.version}{item.is_active ? "" : " (inactive)"}
+                  </option>
+                ))}
+              </>
+            )}
           </select>
         </Field>
 

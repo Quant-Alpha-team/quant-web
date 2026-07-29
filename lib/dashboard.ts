@@ -110,6 +110,34 @@ export function toNumber(value: unknown) {
   return 0;
 }
 
+type StrategyIdentityRow = {
+  strategy_name?: string;
+  strategy_family?: string;
+  strategy_version?: string | null;
+};
+
+export function strategyIdentity(row: StrategyIdentityRow) {
+  const strategyName = row.strategy_name?.trim() || "Unknown";
+  const legacyMatch = strategyName.match(/^(.*)_(V\d+)$/i);
+  const family =
+    row.strategy_family?.trim() || legacyMatch?.[1] || strategyName;
+  let version: string | null = null;
+  if (typeof row.strategy_version === "string" && row.strategy_version.trim()) {
+    version = row.strategy_version.trim();
+  } else if (row.strategy_version === undefined && !row.strategy_family) {
+    version = legacyMatch?.[2]?.toUpperCase() ?? null;
+  }
+  return { family, version, strategyName };
+}
+
+export function strategyFamily(row: StrategyIdentityRow) {
+  return strategyIdentity(row).family;
+}
+
+export function strategyVersionLabel(row: StrategyIdentityRow) {
+  return strategyIdentity(row).version ?? "N/A";
+}
+
 function timeValue(value: string | undefined) {
   if (!value) {
     return 0;
@@ -232,7 +260,7 @@ export function computeKpis(
     openStrategies: new Set(
       positionRows.map(
         (row) =>
-          `${row.strategy_name ?? "unknown"}|${row.broker_account_id ?? "unknown"}`,
+          `${strategyFamily(row)}|${row.broker_account_id ?? "unknown"}`,
       ),
     ).size,
     pricedPositions: 0,
@@ -270,7 +298,12 @@ export function computeKpis(
   const recordedRealizedRows = pnlRows.filter(
     (row) => optionalNumber(row.realized_pnl) !== null,
   );
-  kpi.periodRealizedRecords = recordedRealizedRows.length;
+  kpi.periodRealizedRecords = new Set(
+    recordedRealizedRows.map(
+      (row) =>
+        `${strategyFamily(row)}|${row.broker_account_id ?? "unknown"}|${row.date ?? "unknown"}`,
+    ),
+  ).size;
   if (recordedRealizedRows.length > 0) {
     kpi.periodRealizedPnl = recordedRealizedRows.reduce(
       (total, row) => total + toNumber(row.realized_pnl),
@@ -381,23 +414,61 @@ export function sortByNewest<
 }
 
 export function pnlSummary(rows: StrategyDailyPnl[]) {
-  const byStrategy = new Map<
+  const byFamilyDay = new Map<
+    string,
+    {
+      family: string;
+      pnl: number;
+      hasPnl: boolean;
+      complete: boolean;
+    }
+  >();
+
+  for (const row of rows) {
+    const family = strategyFamily(row);
+    const key = JSON.stringify([
+      family,
+      row.broker_account_id ?? "Unknown",
+      row.date ?? "Unknown",
+    ]);
+    const entry = byFamilyDay.get(key) ?? {
+      family,
+      pnl: 0,
+      hasPnl: false,
+      complete: true,
+    };
+    if (row.daily_pnl === null || row.daily_pnl === undefined) {
+      entry.complete = false;
+    } else {
+      entry.pnl += toNumber(row.daily_pnl);
+      entry.hasPnl = true;
+    }
+    byFamilyDay.set(key, entry);
+  }
+
+  const byFamily = new Map<
     string,
     { strategy: string; pnl: number; wins: number; losses: number }
   >();
 
-  for (const row of rows) {
-    const strategy = row.strategy_name || "Unknown";
+  for (const familyDay of byFamilyDay.values()) {
+    if (!familyDay.hasPnl) {
+      continue;
+    }
+    const strategy = familyDay.family;
     const entry =
-      byStrategy.get(strategy) ??
-      byStrategy
+      byFamily.get(strategy) ??
+      byFamily
         .set(strategy, { strategy, pnl: 0, wins: 0, losses: 0 })
         .get(strategy);
     if (!entry) {
       continue;
     }
-    const pnl = toNumber(row.daily_pnl);
+    const pnl = familyDay.pnl;
     entry.pnl += pnl;
+    if (!familyDay.complete) {
+      continue;
+    }
     if (pnl > 0) {
       entry.wins += 1;
     } else if (pnl < 0) {
@@ -405,7 +476,7 @@ export function pnlSummary(rows: StrategyDailyPnl[]) {
     }
   }
 
-  return [...byStrategy.values()]
+  return [...byFamily.values()]
     .map((entry) => {
       const total = entry.wins + entry.losses;
       return {

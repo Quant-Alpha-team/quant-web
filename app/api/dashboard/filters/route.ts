@@ -9,6 +9,7 @@ export async function GET() {
     const filters = await getFilters();
     logInfo("Filter metadata loaded", {
       strategies: filters.strategies.length,
+      strategy_families: filters.strategy_families.length,
       accounts: filters.accounts.length,
     });
     return Response.json({ ok: true, data: filters });
@@ -19,7 +20,11 @@ export async function GET() {
         : String(error);
     logError("Filter metadata failed", { error: message });
     return Response.json(
-      { ok: false, error: { message }, data: { strategies: [], accounts: [] } },
+      {
+        ok: false,
+        error: { message },
+        data: { strategies: [], strategy_families: [], accounts: [] },
+      },
       { status: 503 },
     );
   }

@@ -41,6 +41,9 @@ import {
   recordCounts,
   resolveDateRange,
   sortByNewest,
+  strategyFamily,
+  strategyIdentity,
+  strategyVersionLabel,
   toNumber,
   todayInTimeZone,
 } from "@/lib/dashboard";
@@ -63,7 +66,11 @@ type ApiResponse<T> = {
   };
 };
 
-const emptyFilters: FilterOptions = { strategies: [], accounts: [] };
+const emptyFilters: FilterOptions = {
+  strategies: [],
+  strategy_families: [],
+  accounts: [],
+};
 const emptyData: DashboardData = { execRows: [], perfRows: [], pnlRows: [], positionRows: [] };
 const surfaceClass =
   "rounded-md bg-[radial-gradient(circle_at_100%_0%,rgba(94,234,212,0.1),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.095),rgba(255,255,255,0.055))] p-4 shadow-[0_18px_42px_var(--shadow)] backdrop-blur-xl";
@@ -175,11 +182,11 @@ function formatSignedPercent(value: number) {
 }
 
 function OverviewPanel({
-  strategy,
+  strategyScope,
   accountId,
   data,
 }: {
-  strategy: string;
+  strategyScope: string;
   accountId: string;
   data: DashboardData;
 }) {
@@ -198,20 +205,20 @@ function OverviewPanel({
     kpi.navChange === null || kpi.navChangePercent === null
       ? "One NAV close in selected range"
       : `${formatSignedCurrency(kpi.navChange)} (${formatSignedPercent(kpi.navChangePercent)})`;
-  const tradedStrategies = new Set(
-    data.execRows.map((row) => row.strategy_name ?? "Unattributed"),
+  const tradedFamilies = new Set(
+    data.execRows.map((row) => strategyFamily(row)),
   ).size;
   const tradesDetail =
     kpi.totalTrades === 0
       ? "No executions in selected range"
-      : `${tradedStrategies} ${tradedStrategies === 1 ? "strategy" : "strategies"} in selected range`;
+      : `${tradedFamilies} ${tradedFamilies === 1 ? "family" : "families"} in selected range`;
   const commissionDetail =
     kpi.totalTrades === 0
       ? "No commission in selected range"
       : `${formatCurrency(Math.abs(kpi.totalCommission) / kpi.totalTrades)} average per trade`;
 
   return (
-    <Panel title={`Portfolio Overview: ${strategy} (${accountId})`}>
+    <Panel title={`Portfolio Overview: ${strategyScope} (${accountId})`}>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <div className="lg:col-span-2">
           <MetricCard
@@ -260,7 +267,7 @@ function OverviewPanel({
           <MetricCard
             label="Open Positions"
             value={String(kpi.openPositions)}
-            delta={`${kpi.openStrategies} ${kpi.openStrategies === 1 ? "strategy" : "strategies"}`}
+            delta={`${kpi.openStrategies} ${kpi.openStrategies === 1 ? "family" : "families"}`}
             tone="neutral"
           />
         </div>
@@ -349,6 +356,7 @@ const strategyPnlHelp =
   "Daily P&L is net of commission and includes the daily open-position mark change when pricing is available. Realized P&L is the day's realized result after commission; opening-only fees do not create realized P&L. Unrealized P&L is shown separately. Empty zero-only archive rows are omitted.";
 
 function StrategyPnlPanel({ rows }: { rows: StrategyDailyPnl[] }) {
+  const summary = pnlSummary(rows);
   const informativeRows = rows.filter(
     (row) =>
       isMarkToMarketRow(row) ||
@@ -357,7 +365,7 @@ function StrategyPnlPanel({ rows }: { rows: StrategyDailyPnl[] }) {
         Math.abs(toNumber(row.daily_pnl)) >= 0.005),
   );
 
-  if (informativeRows.length === 0) {
+  if (informativeRows.length === 0 && summary.length === 0) {
     return (
       <Panel title="Strategy P&L Performance" helpText={strategyPnlHelp}>
         <EmptyPanel>
@@ -367,12 +375,11 @@ function StrategyPnlPanel({ rows }: { rows: StrategyDailyPnl[] }) {
     );
   }
 
-  const summary = pnlSummary(informativeRows);
   const orderedRows = sortByNewest(informativeRows);
   const summaryColumns: TableColumn<(typeof summary)[number]>[] = [
     {
       key: "strategy",
-      label: "Strategy",
+      label: "Strategy Family",
       width: "24%",
       sortValue: (row) => row.strategy,
       render: (row) => row.strategy,
@@ -421,12 +428,27 @@ function StrategyPnlPanel({ rows }: { rows: StrategyDailyPnl[] }) {
       render: (row) => formatDate(row.date),
     },
     {
-      key: "strategy",
-      label: "Strategy",
+      key: "family",
+      label: "Family",
       width: "250px",
       sticky: "left",
       stickyOffset: "140px",
       stickyEdge: true,
+      sortValue: (row) => strategyFamily(row),
+      render: (row) => strategyFamily(row),
+    },
+    {
+      key: "version",
+      label: "Version",
+      width: "110px",
+      sortValue: (row) => strategyVersionLabel(row),
+      render: (row) => strategyVersionLabel(row),
+    },
+    {
+      key: "strategyIdentity",
+      label: "Strategy ID",
+      width: "280px",
+      sortValue: (row) => row.strategy_name,
       render: (row) => row.strategy_name ?? "—",
     },
     {
@@ -466,7 +488,7 @@ function StrategyPnlPanel({ rows }: { rows: StrategyDailyPnl[] }) {
       <div className="grid gap-4">
         <DataTable rows={summary} columns={summaryColumns} />
         <div className={surfaceClass}>
-          <PnlBarChart rows={informativeRows} />
+          <PnlBarChart rows={rows} />
         </div>
       </div>
       <div className="space-y-3">
@@ -484,6 +506,8 @@ function StrategyPnlPanel({ rows }: { rows: StrategyDailyPnl[] }) {
                   const marked = isMarkToMarketRow(row);
                   return [
                     formatDate(row.date),
+                    strategyFamily(row),
+                    strategyVersionLabel(row),
                     row.strategy_name ?? "",
                     row.broker_account_id ?? "",
                     row.daily_pnl ?? "",
@@ -505,7 +529,7 @@ function StrategyPnlPanel({ rows }: { rows: StrategyDailyPnl[] }) {
           key={`pnl-${informativeRows.length}-${orderedRows[0]?.date ?? "empty"}`}
           rows={orderedRows}
           columns={rawColumns}
-          minWidth="1600px"
+          minWidth="1900px"
           pagination={{ enabled: true, pageSize: 20 }}
         />
       </div>
@@ -694,6 +718,10 @@ function StrategyPositionsPanel({
   timezone: string;
 }) {
   const orderedRows = [...rows].sort((left, right) => {
+    const familyOrder = strategyFamily(left).localeCompare(strategyFamily(right));
+    if (familyOrder !== 0) {
+      return familyOrder;
+    }
     const strategyOrder = (left.strategy_name ?? "").localeCompare(right.strategy_name ?? "");
     if (strategyOrder !== 0) {
       return strategyOrder;
@@ -709,8 +737,8 @@ function StrategyPositionsPanel({
 
   const strategyMap = new Map<string, StrategyPosition[]>();
   for (const row of orderedRows) {
-    const strategyName = row.strategy_name ?? "Unattributed";
-    strategyMap.set(strategyName, [...(strategyMap.get(strategyName) ?? []), row]);
+    const family = strategyFamily(row);
+    strategyMap.set(family, [...(strategyMap.get(family) ?? []), row]);
   }
   const strategyGroups = [...strategyMap.entries()];
   const latestSnapshot = sortByNewest(rows)[0]?.snapshot_at;
@@ -1002,7 +1030,9 @@ function StrategyPositionsPanel({
   }
 
   const csvHeaders = [
-    "Strategy",
+    "Family",
+    "Version",
+    "Strategy ID",
     "Account",
     "Symbol",
     "Description",
@@ -1021,18 +1051,18 @@ function StrategyPositionsPanel({
 
   return (
     <Panel
-      title="Current Holdings by Strategy"
-      helpText="Current contracts and aggregate quantities are verified against IBKR. Strategy attribution and cost basis come from strategy-tagged executions; missing broker prices remain blank."
+      title="Current Holdings by Strategy Family"
+      helpText="Current contracts and aggregate quantities are verified against IBKR. Holdings are grouped by family, while each row keeps its version and original strategy ID so positions from different variants are never netted together."
     >
 
       {rows.length === 0 ? (
-        <EmptyPanel>No current broker positions exist for this strategy/account.</EmptyPanel>
+        <EmptyPanel>No current broker positions exist for this family/account.</EmptyPanel>
       ) : (
         <div className="space-y-4">
           <div className="flex flex-col gap-3 rounded-md border border-white/[0.08] bg-white/[0.05] px-4 py-3 shadow-[0_12px_30px_rgba(0,5,18,0.16)] md:flex-row md:items-center md:justify-between">
             <div>
               <div className="font-mono text-[11px] uppercase text-[var(--muted-strong)]">
-                {rows.length} current positions across {strategyGroups.length} strategies
+                {rows.length} current positions across {strategyGroups.length} families
               </div>
               <div className="mt-1 text-xs text-[var(--muted)]">
                 Broker snapshot {formatTimestamp(latestSnapshot, timezone)}
@@ -1061,9 +1091,11 @@ function StrategyPositionsPanel({
                 type="button"
                 onClick={() =>
                   downloadCsv(
-                    "current-holdings-by-strategy.csv",
+                    "current-holdings-by-family.csv",
                     csvHeaders,
                     orderedRows.map((row) => [
+                      strategyFamily(row),
+                      strategyVersionLabel(row),
                       row.strategy_name ?? "Unattributed",
                       row.broker_account_id ?? "-",
                       positionInstrumentLabel(row),
@@ -1096,6 +1128,14 @@ function StrategyPositionsPanel({
             const costBasis = sumPositionValues(strategyRows, (row) => row.cost_basis);
             const gainLoss = sumPositionValues(strategyRows, (row) => row.unrealized_pnl);
             const accounts = [...new Set(strategyRows.map((row) => row.broker_account_id).filter(Boolean))];
+            const variants = [
+              ...new Map(
+                strategyRows.map((row) => {
+                  const identity = strategyIdentity(row);
+                  return [identity.strategyName, identity] as const;
+                }),
+              ).values(),
+            ];
             const reconciledCount = strategyRows.filter(
               (row) => row.source === "BROKER_RECONCILED",
             ).length;
@@ -1146,6 +1186,15 @@ function StrategyPositionsPanel({
                           <span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1 font-mono text-[10px] uppercase text-[var(--accent-strong)]">
                             {strategyRows.length} positions
                           </span>
+                          {variants.map((variant) => (
+                            <span
+                              key={variant.strategyName}
+                              title={variant.strategyName}
+                              className="rounded-full bg-violet-400/15 px-2.5 py-1 font-mono text-[10px] uppercase text-violet-200"
+                            >
+                              {variant.version ?? "N/A"}
+                            </span>
+                          ))}
                           {reconciledCount > 0 ? (
                             <span className="rounded-full bg-amber-400/15 px-2.5 py-1 font-mono text-[10px] uppercase text-amber-200">
                               {reconciledCount} broker reconciled
@@ -1157,7 +1206,7 @@ function StrategyPositionsPanel({
                           )}
                         </span>
                         <span className="mt-1 block text-xs text-[var(--muted)]">
-                          Account {accounts.join(", ") || "—"} · {isCollapsed ? "Show holdings" : "Hide holdings"}
+                          {variants.length} {variants.length === 1 ? "variant" : "variants"} · Account {accounts.join(", ") || "—"} · {isCollapsed ? "Show holdings" : "Hide holdings"}
                         </span>
                       </span>
                     </button>
@@ -1420,7 +1469,9 @@ function StrategyPositionsPanel({
                                     {positionDescription(row)}
                                   </div>
                                   <div className="mt-1 text-[10px] text-[var(--muted)]">
-                                    {row.broker_account_id ?? "—"}
+                                    <span title={row.strategy_name}>
+                                      {strategyVersionLabel(row)} · {row.strategy_name ?? "Unknown"} · {row.broker_account_id ?? "—"}
+                                    </span>
                                   </div>
                                 </td>
                                 <td className="whitespace-nowrap px-3 py-3 text-right font-mono">
@@ -1707,12 +1758,27 @@ function TradeLogsPanel({
       render: (row) => formatTimestamp(row.timestamp, timezone),
     },
     {
-      key: "strategy",
-      label: "Strategy",
-      width: "270px",
+      key: "family",
+      label: "Family",
+      width: "250px",
       sticky: "left",
       stickyOffset: "205px",
       stickyEdge: true,
+      sortValue: (row) => strategyFamily(row),
+      render: (row) => strategyFamily(row),
+    },
+    {
+      key: "version",
+      label: "Version",
+      width: "110px",
+      sortValue: (row) => strategyVersionLabel(row),
+      render: (row) => strategyVersionLabel(row),
+    },
+    {
+      key: "strategyIdentity",
+      label: "Strategy ID",
+      width: "280px",
+      sortValue: (row) => row.strategy_name,
       render: (row) => row.strategy_name ?? "-",
     },
     {
@@ -1767,6 +1833,8 @@ function TradeLogsPanel({
               columns.map((column) => column.label),
               sortedRows.map((row) => [
                 formatTimestamp(row.timestamp, timezone),
+                strategyFamily(row),
+                strategyVersionLabel(row),
                 row.strategy_name ?? "-",
                 row.broker_account_id ?? "-",
                 row.symbol ?? "-",
@@ -1795,7 +1863,7 @@ function TradeLogsPanel({
           key={`trades-${rows.length}-${sortedRows[0]?.timestamp ?? "empty"}`}
           rows={sortedRows}
           columns={columns}
-          minWidth="2200px"
+          minWidth="2500px"
           pagination={{ enabled: true, pageSize: 25 }}
         />
       )}
@@ -1804,14 +1872,16 @@ function TradeLogsPanel({
 }
 
 function DiagnosticsPanel({
-  strategy,
+  strategyFamilyFilter,
+  strategyVersion,
   accountId,
   startDate,
   endDate,
   timezone,
   data,
 }: {
-  strategy: string;
+  strategyFamilyFilter: string;
+  strategyVersion: string;
   accountId: string;
   startDate: string;
   endDate: string;
@@ -1820,7 +1890,8 @@ function DiagnosticsPanel({
 }) {
   const counts = recordCounts(data);
   const rows = [
-    ["Strategy filter", strategy],
+    ["Strategy family filter", strategyFamilyFilter],
+    ["Strategy version filter", strategyVersion],
     ["Account filter", accountId],
     ["Date range", `${startDate} to ${endDate}`],
     ["Timezone", timezone],
@@ -1855,7 +1926,8 @@ function DiagnosticsPanel({
 export function DashboardShell() {
   const initialToday = todayInTimeZone("Asia/Taipei");
   const [filters, setFilters] = useState<FilterOptions>(emptyFilters);
-  const [strategy, setStrategy] = useState("ALL");
+  const [selectedFamily, setSelectedFamily] = useState("ALL");
+  const [selectedVersion, setSelectedVersion] = useState("ALL");
   const [accountId, setAccountId] = useState("ALL");
   const [datePreset, setDatePreset] = useState<DatePreset>("Today");
   const [timezone, setTimezone] = useState("Asia/Taipei");
@@ -1913,7 +1985,8 @@ export function DashboardShell() {
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
-          strategy,
+          strategyFamily: selectedFamily,
+          strategyVersion: selectedVersion,
           accountId,
           startDate: range.startDate,
           endDate: range.endDate,
@@ -1938,7 +2011,21 @@ export function DashboardShell() {
     });
 
     return () => controller.abort();
-  }, [accountId, range.endDate, range.startDate, refreshKey, section, strategy, timezone]);
+  }, [
+    accountId,
+    range.endDate,
+    range.startDate,
+    refreshKey,
+    section,
+    selectedFamily,
+    selectedVersion,
+    timezone,
+  ]);
+
+  function handleStrategyFamilyChange(value: string) {
+    setSelectedFamily(value);
+    setSelectedVersion("ALL");
+  }
 
   async function handleRefresh() {
     setSyncing(true);
@@ -1962,7 +2049,11 @@ export function DashboardShell() {
     if (section === "overview") {
       return (
         <OverviewPanel
-          strategy={strategy}
+          strategyScope={
+            selectedVersion === "ALL"
+              ? selectedFamily
+              : `${selectedFamily} / ${selectedVersion}`
+          }
           accountId={accountId}
           data={data}
         />
@@ -1982,7 +2073,8 @@ export function DashboardShell() {
     }
     return (
       <DiagnosticsPanel
-        strategy={strategy}
+        strategyFamilyFilter={selectedFamily}
+        strategyVersion={selectedVersion}
         accountId={accountId}
         startDate={range.startDate}
         endDate={range.endDate}
@@ -1997,13 +2089,17 @@ export function DashboardShell() {
       <SidebarFilters
         collapsed={sidebarCollapsed}
         filters={filters}
-        strategy={strategy}
+        strategyFamily={selectedFamily}
+        strategyVersion={selectedVersion}
         accountId={accountId}
         datePreset={datePreset}
         timezone={timezone}
         customStart={customStart}
         customEnd={customEnd}
-        onStrategyChange={setStrategy}
+        onStrategyFamilyChange={handleStrategyFamilyChange}
+        onStrategyVersionChange={(value) =>
+          setSelectedVersion(selectedFamily === "ALL" ? "ALL" : value)
+        }
         onAccountChange={setAccountId}
         onPresetChange={setDatePreset}
         onTimezoneChange={setTimezone}
@@ -2035,8 +2131,13 @@ export function DashboardShell() {
               </h1>
               <div className="flex flex-wrap gap-3 text-xs text-[var(--muted)]">
                 <span className={`${metaPillClass} border-[rgba(45,212,191,0.18)] bg-[rgba(45,212,191,0.09)] text-[var(--accent-strong)]`}>
-                  {strategy}
+                  {selectedFamily}
                 </span>
+                {selectedFamily !== "ALL" ? (
+                  <span className={`${metaPillClass} border-[rgba(192,132,252,0.18)] bg-[rgba(192,132,252,0.08)] text-[#ddd6fe]`}>
+                    {selectedVersion === "ALL" ? "ALL VERSIONS" : selectedVersion}
+                  </span>
+                ) : null}
                 <span className={`${metaPillClass} border-[rgba(56,189,248,0.18)] bg-[rgba(56,189,248,0.08)] text-[#bae6fd]`}>
                   {accountId}
                 </span>

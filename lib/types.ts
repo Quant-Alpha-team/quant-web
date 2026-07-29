@@ -23,14 +23,28 @@ export type AccountOption = {
   [key: string]: unknown;
 };
 
+export type StrategyVersionOption = {
+  version: string | null;
+  strategy_name: string;
+  is_active: boolean;
+};
+
+export type StrategyFamilyOption = {
+  family: string;
+  versions: StrategyVersionOption[];
+};
+
 export type FilterOptions = {
   strategies: string[];
+  strategy_families: StrategyFamilyOption[];
   accounts: AccountOption[];
 };
 
 export type TradeExecution = {
   timestamp?: string;
   strategy_name?: string;
+  strategy_family?: string;
+  strategy_version?: string | null;
   broker_account_id?: string;
   symbol?: string;
   sec_type?: string;
@@ -57,6 +71,8 @@ export type AccountEquity = {
 export type StrategyDailyPnl = {
   date?: string;
   strategy_name?: string;
+  strategy_family?: string;
+  strategy_version?: string | null;
   broker_account_id?: string;
   total_equity?: number | string;
   daily_pnl?: number | string | null;
@@ -76,6 +92,8 @@ export type StrategyPosition = {
   snapshot_at?: string;
   trading_date?: string;
   strategy_name?: string;
+  strategy_family?: string;
+  strategy_version?: string | null;
   broker_account_id?: string;
   symbol?: string;
   local_symbol?: string;
@@ -103,7 +121,8 @@ export type StrategyPosition = {
 };
 
 export type DashboardQuery = {
-  strategy: string;
+  strategyFamily: string;
+  strategyVersion: string;
   accountId: string;
   startDate: string;
   endDate: string;

@@ -37,10 +37,20 @@ function boolValue(value: unknown) {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as Partial<DashboardQuery>;
+    const body = (await request.json()) as Partial<DashboardQuery> & {
+      strategy?: string;
+    };
     const today = new Date().toISOString().slice(0, 10);
+    const strategyFamily = stringValue(
+      body.strategyFamily ?? body.strategy,
+      "ALL",
+    );
     const query: DashboardQuery = {
-      strategy: stringValue(body.strategy, "ALL"),
+      strategyFamily,
+      strategyVersion:
+        strategyFamily === "ALL"
+          ? "ALL"
+          : stringValue(body.strategyVersion, "ALL"),
       accountId: stringValue(body.accountId, "ALL"),
       startDate: stringValue(body.startDate, today),
       endDate: stringValue(body.endDate, today),
@@ -57,7 +67,8 @@ export async function POST(request: Request) {
       layout: "wide",
     });
     logInfo("Filters applied", {
-      strategy: query.strategy,
+      strategy_family: query.strategyFamily,
+      strategy_version: query.strategyVersion,
       account: query.accountId,
       start: query.startDate,
       end: query.endDate,
