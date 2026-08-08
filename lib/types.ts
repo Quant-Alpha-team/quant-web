@@ -121,8 +121,8 @@ export type StrategyPosition = {
 };
 
 export type DashboardQuery = {
-  strategyFamily: string;
-  strategyVersion: string;
+  strategyFamilies: string[];
+  strategyVersions: string[];
   accountId: string;
   startDate: string;
   endDate: string;

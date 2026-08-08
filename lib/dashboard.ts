@@ -9,7 +9,7 @@ import type {
   TradeExecution,
 } from "@/lib/types";
 
-export const DEFAULT_TIMEZONES = ["Asia/Taipei", "America/New_York", "UTC"];
+export const DEFAULT_TIMEZONES = ["America/New_York", "Asia/Taipei"];
 
 export const DATE_PRESETS: DatePreset[] = [
   "Today",

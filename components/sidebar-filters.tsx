@@ -1,8 +1,11 @@
 "use client";
 
 import Image from "next/image";
+import { useEffect, useRef, useState } from "react";
 import {
   CalendarDays,
+  Check,
+  ChevronDown,
   Clock3,
   GitBranch,
   Layers3,
@@ -31,13 +34,13 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label className="block">
+    <div className="block">
       <span className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-normal text-[var(--muted)]">
         <SignalIcon icon={Icon} tone={tone} className="h-6 w-6" iconClassName="h-3.5 w-3.5" />
         {label}
       </span>
       {children}
-    </label>
+    </div>
   );
 }
 
@@ -47,18 +50,161 @@ const inputClass =
 const toggleButtonClass =
   "grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-md border border-white/[0.1] bg-white/[0.08] text-[var(--muted-strong)] shadow-[0_10px_22px_rgba(0,5,18,0.16)] transition hover:-translate-y-px hover:bg-white/[0.13] hover:text-[var(--foreground)]";
 
+type MultiSelectOption = {
+  value: string;
+  label: string;
+};
+
+function MultiSelect({
+  label,
+  allLabel,
+  options,
+  values,
+  disabled = false,
+  onChange,
+}: {
+  label: string;
+  allLabel: string;
+  options: MultiSelectOption[];
+  values: string[];
+  disabled?: boolean;
+  onChange: (values: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selectedValues = new Set(values);
+  const isAll =
+    values.includes("ALL") ||
+    (options.length > 0 && options.every((option) => selectedValues.has(option.value)));
+  const selectedLabels = options
+    .filter((option) => isAll || selectedValues.has(option.value))
+    .map((option) => option.label);
+  const summary = isAll
+    ? allLabel
+    : selectedLabels.length === 0
+      ? "NONE"
+      : selectedLabels.length === 1
+        ? selectedLabels[0]
+        : `${selectedLabels.length} SELECTED`;
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+
+  function toggleValue(value: string) {
+    if (value === "ALL") {
+      onChange(isAll ? [] : ["ALL"]);
+      return;
+    }
+
+    const nextValues = isAll
+      ? options.map((option) => option.value).filter((item) => item !== value)
+      : selectedValues.has(value)
+        ? values.filter((item) => item !== value)
+        : [...values, value];
+    onChange(nextValues.length === options.length ? ["ALL"] : nextValues);
+  }
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        aria-label={label}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        disabled={disabled}
+        title={isAll ? allLabel : selectedLabels.join(", ")}
+        className={`${inputClass} flex cursor-pointer items-center justify-between gap-3 text-left disabled:cursor-not-allowed disabled:opacity-55`}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="truncate">{summary}</span>
+        <ChevronDown
+          className={`h-4 w-4 shrink-0 text-[var(--muted)] transition-transform ${open ? "rotate-180" : ""}`}
+          aria-hidden="true"
+        />
+      </button>
+
+      {open && !disabled ? (
+        <div
+          role="listbox"
+          aria-label={label}
+          aria-multiselectable="true"
+          className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-[70] max-h-64 overflow-y-auto rounded-md border border-white/[0.14] bg-[#172437]/[0.98] p-1.5 shadow-[0_18px_45px_rgba(0,5,18,0.5)] backdrop-blur-xl"
+        >
+          {[{ value: "ALL", label: allLabel }, ...options].map((option) => {
+            const checked =
+              option.value === "ALL" ? isAll : isAll || selectedValues.has(option.value);
+            return (
+              <div
+                key={option.value}
+                className={
+                  option.value === "ALL"
+                    ? "sticky top-0 z-10 mb-1.5 border-b border-white/[0.14] bg-[#172437] pb-1.5"
+                    : ""
+                }
+              >
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={checked}
+                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2.5 py-2 text-left text-sm text-[var(--foreground)] transition hover:bg-white/[0.1] focus-visible:bg-white/[0.1] focus-visible:outline-none"
+                  onClick={() => toggleValue(option.value)}
+                >
+                  <span
+                    className={`grid h-4 w-4 shrink-0 place-items-center rounded border ${
+                      checked
+                        ? "border-cyan-300 bg-cyan-300 text-[#061322]"
+                        : "border-white/25 bg-white/[0.04]"
+                    }`}
+                    aria-hidden="true"
+                  >
+                    {checked ? <Check className="h-3 w-3" /> : null}
+                  </span>
+                  <span className="truncate">{option.label}</span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function SidebarFilters({
   collapsed,
   filters,
-  strategyFamily,
-  strategyVersion,
+  strategyFamilies,
+  strategyVersions,
   accountId,
   datePreset,
   timezone,
   customStart,
   customEnd,
-  onStrategyFamilyChange,
-  onStrategyVersionChange,
+  onStrategyFamiliesChange,
+  onStrategyVersionsChange,
   onAccountChange,
   onPresetChange,
   onTimezoneChange,
@@ -68,15 +214,15 @@ export function SidebarFilters({
 }: {
   collapsed: boolean;
   filters: FilterOptions;
-  strategyFamily: string;
-  strategyVersion: string;
+  strategyFamilies: string[];
+  strategyVersions: string[];
   accountId: string;
   datePreset: DatePreset;
   timezone: string;
   customStart: string;
   customEnd: string;
-  onStrategyFamilyChange: (value: string) => void;
-  onStrategyVersionChange: (value: string) => void;
+  onStrategyFamiliesChange: (values: string[]) => void;
+  onStrategyVersionsChange: (values: string[]) => void;
   onAccountChange: (value: string) => void;
   onPresetChange: (value: DatePreset) => void;
   onTimezoneChange: (value: string) => void;
@@ -87,17 +233,26 @@ export function SidebarFilters({
   const range = resolveDateRange(datePreset, timezone, customStart, customEnd);
   const today = todayInTimeZone(timezone);
   const ToggleIcon = collapsed ? PanelLeftOpen : PanelLeftClose;
-  const selectedFamily = filters.strategy_families.find(
-    (item) => item.family === strategyFamily,
+  const selectedFamilyOptions = filters.strategy_families.filter((item) =>
+    strategyFamilies.includes(item.family),
   );
-  const versionOptions =
-    selectedFamily?.versions.filter(
-      (item): item is typeof item & { version: string } => item.version !== null,
-    ) ?? [];
+  const versionsByName = new Map<string, { active: boolean }>();
+  for (const family of selectedFamilyOptions) {
+    for (const item of family.versions) {
+      if (item.version !== null) {
+        versionsByName.set(item.version, {
+          active: (versionsByName.get(item.version)?.active ?? false) || item.is_active,
+        });
+      }
+    }
+  }
+  const versionOptions = [...versionsByName.entries()].map(([version, item]) => ({
+    value: version,
+    label: `${version}${item.active ? "" : " (inactive)"}`,
+  }));
   const hasVersions = versionOptions.length > 0;
-  const versionDisabled = strategyFamily === "ALL" || !hasVersions;
-  const versionValue =
-    strategyFamily === "ALL" ? "ALL" : hasVersions ? strategyVersion : "N/A";
+  const versionDisabled =
+    strategyFamilies.length === 0 || strategyFamilies.includes("ALL") || !hasVersions;
 
   if (collapsed) {
     return (
@@ -179,42 +334,28 @@ export function SidebarFilters({
 
       <div className="space-y-5">
         <Field icon={Layers3} label="Strategy" tone="violet">
-          <select
-            className={inputClass}
-            value={strategyFamily}
-            onChange={(event) => onStrategyFamilyChange(event.target.value)}
-          >
-            <option value="ALL">ALL</option>
-            {filters.strategy_families.map((item) => (
-              <option key={item.family} value={item.family}>
-                {item.family}
-              </option>
-            ))}
-          </select>
+          <MultiSelect
+            label="Strategy"
+            allLabel="ALL"
+            values={strategyFamilies}
+            options={filters.strategy_families.map((item) => ({
+              value: item.family,
+              label: item.family,
+            }))}
+            onChange={onStrategyFamiliesChange}
+          />
         </Field>
 
         <Field icon={GitBranch} label="Version" tone="violet">
-          <select
-            className={`${inputClass} disabled:cursor-not-allowed disabled:opacity-55`}
-            value={versionValue}
+          <MultiSelect
+            key={versionDisabled ? "disabled" : "enabled"}
+            label="Version"
+            allLabel={hasVersions || strategyFamilies.includes("ALL") ? "ALL VERSIONS" : "N/A"}
+            values={strategyVersions}
+            options={versionOptions}
             disabled={versionDisabled}
-            onChange={(event) => onStrategyVersionChange(event.target.value)}
-          >
-            {strategyFamily === "ALL" ? (
-              <option value="ALL">ALL VERSIONS</option>
-            ) : !hasVersions ? (
-              <option value="N/A">N/A</option>
-            ) : (
-              <>
-                <option value="ALL">ALL VERSIONS</option>
-                {versionOptions.map((item) => (
-                  <option key={item.strategy_name} value={item.version}>
-                    {item.version}{item.is_active ? "" : " (inactive)"}
-                  </option>
-                ))}
-              </>
-            )}
-          </select>
+            onChange={onStrategyVersionsChange}
+          />
         </Field>
 
         <Field icon={WalletCards} label="Broker Account" tone="cyan">

@@ -72,6 +72,14 @@ const emptyFilters: FilterOptions = {
   accounts: [],
 };
 const emptyData: DashboardData = { execRows: [], perfRows: [], pnlRows: [], positionRows: [] };
+
+function selectionLabel(values: string[], allLabel: string) {
+  if (values.includes("ALL")) {
+    return allLabel;
+  }
+  return values.length > 0 ? values.join(", ") : "NONE";
+}
+
 const surfaceClass =
   "rounded-md bg-[radial-gradient(circle_at_100%_0%,rgba(94,234,212,0.1),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.095),rgba(255,255,255,0.055))] p-4 shadow-[0_18px_42px_var(--shadow)] backdrop-blur-xl";
 const statusPillClass =
@@ -1924,13 +1932,13 @@ function DiagnosticsPanel({
 }
 
 export function DashboardShell() {
-  const initialToday = todayInTimeZone("Asia/Taipei");
+  const initialToday = todayInTimeZone("America/New_York");
   const [filters, setFilters] = useState<FilterOptions>(emptyFilters);
-  const [selectedFamily, setSelectedFamily] = useState("ALL");
-  const [selectedVersion, setSelectedVersion] = useState("ALL");
+  const [selectedFamilies, setSelectedFamilies] = useState<string[]>(["ALL"]);
+  const [selectedVersions, setSelectedVersions] = useState<string[]>(["ALL"]);
   const [accountId, setAccountId] = useState("ALL");
   const [datePreset, setDatePreset] = useState<DatePreset>("Today");
-  const [timezone, setTimezone] = useState("Asia/Taipei");
+  const [timezone, setTimezone] = useState("America/New_York");
   const [customStart, setCustomStart] = useState(initialToday);
   const [customEnd, setCustomEnd] = useState(initialToday);
   const [section, setSection] = useState<SectionId>("overview");
@@ -1985,8 +1993,8 @@ export function DashboardShell() {
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
-          strategyFamily: selectedFamily,
-          strategyVersion: selectedVersion,
+          strategyFamilies: selectedFamilies,
+          strategyVersions: selectedVersions,
           accountId,
           startDate: range.startDate,
           endDate: range.endDate,
@@ -2017,14 +2025,14 @@ export function DashboardShell() {
     range.startDate,
     refreshKey,
     section,
-    selectedFamily,
-    selectedVersion,
+    selectedFamilies,
+    selectedVersions,
     timezone,
   ]);
 
-  function handleStrategyFamilyChange(value: string) {
-    setSelectedFamily(value);
-    setSelectedVersion("ALL");
+  function handleStrategyFamiliesChange(values: string[]) {
+    setSelectedFamilies(values);
+    setSelectedVersions(["ALL"]);
   }
 
   async function handleRefresh() {
@@ -2045,14 +2053,17 @@ export function DashboardShell() {
     }
   }
 
+  const familyLabel = selectionLabel(selectedFamilies, "ALL");
+  const versionLabel = selectionLabel(selectedVersions, "ALL VERSIONS");
+
   const currentPanel = (() => {
     if (section === "overview") {
       return (
         <OverviewPanel
           strategyScope={
-            selectedVersion === "ALL"
-              ? selectedFamily
-              : `${selectedFamily} / ${selectedVersion}`
+            selectedVersions.includes("ALL")
+              ? familyLabel
+              : `${familyLabel} / ${versionLabel}`
           }
           accountId={accountId}
           data={data}
@@ -2073,8 +2084,8 @@ export function DashboardShell() {
     }
     return (
       <DiagnosticsPanel
-        strategyFamilyFilter={selectedFamily}
-        strategyVersion={selectedVersion}
+        strategyFamilyFilter={familyLabel}
+        strategyVersion={versionLabel}
         accountId={accountId}
         startDate={range.startDate}
         endDate={range.endDate}
@@ -2089,17 +2100,15 @@ export function DashboardShell() {
       <SidebarFilters
         collapsed={sidebarCollapsed}
         filters={filters}
-        strategyFamily={selectedFamily}
-        strategyVersion={selectedVersion}
+        strategyFamilies={selectedFamilies}
+        strategyVersions={selectedVersions}
         accountId={accountId}
         datePreset={datePreset}
         timezone={timezone}
         customStart={customStart}
         customEnd={customEnd}
-        onStrategyFamilyChange={handleStrategyFamilyChange}
-        onStrategyVersionChange={(value) =>
-          setSelectedVersion(selectedFamily === "ALL" ? "ALL" : value)
-        }
+        onStrategyFamiliesChange={handleStrategyFamiliesChange}
+        onStrategyVersionsChange={setSelectedVersions}
         onAccountChange={setAccountId}
         onPresetChange={setDatePreset}
         onTimezoneChange={setTimezone}
@@ -2131,11 +2140,11 @@ export function DashboardShell() {
               </h1>
               <div className="flex flex-wrap gap-3 text-xs text-[var(--muted)]">
                 <span className={`${metaPillClass} border-[rgba(45,212,191,0.18)] bg-[rgba(45,212,191,0.09)] text-[var(--accent-strong)]`}>
-                  {selectedFamily}
+                  {familyLabel}
                 </span>
-                {selectedFamily !== "ALL" ? (
+                {!selectedFamilies.includes("ALL") ? (
                   <span className={`${metaPillClass} border-[rgba(192,132,252,0.18)] bg-[rgba(192,132,252,0.08)] text-[#ddd6fe]`}>
-                    {selectedVersion === "ALL" ? "ALL VERSIONS" : selectedVersion}
+                    {versionLabel}
                   </span>
                 ) : null}
                 <span className={`${metaPillClass} border-[rgba(56,189,248,0.18)] bg-[rgba(56,189,248,0.08)] text-[#bae6fd]`}>
