@@ -1,3 +1,9 @@
+## v1.0.1 (2026-08-08)
+
+### Fix
+
+- **web**: add mutli select part
+
 ## v1.0.0 (2026-08-04)
 
 ### Refactor
