@@ -32,13 +32,21 @@ test("legacy strategy names keep their version when modern fields are null", () 
   );
 });
 
-test("last ten years preset describes its actual 3650-day window", () => {
+test("last one year preset describes its actual 365-day window", () => {
   const timezone = "America/New_York";
-  const range = resolveDateRange("Last 10 Years", timezone, "", "");
+  const range = resolveDateRange("Last 1 Year", timezone, "", "");
   assert.equal(range.endDate, todayInTimeZone(timezone));
   const elapsedDays =
     (Date.parse(range.endDate) - Date.parse(range.startDate)) / 86_400_000;
-  assert.equal(elapsedDays, 3650);
+  assert.equal(elapsedDays, 365);
+});
+
+test("year to date starts on January 1 in the selected timezone", () => {
+  const timezone = "Asia/Taipei";
+  const range = resolveDateRange("Year to Date", timezone, "", "");
+
+  assert.equal(range.endDate, todayInTimeZone(timezone));
+  assert.equal(range.startDate, `${range.endDate.slice(0, 4)}-01-01`);
 });
 
 test("equity aggregation ignores invalid NAV rows and keeps the latest valid close", () => {

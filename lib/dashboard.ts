@@ -15,7 +15,8 @@ export const DATE_PRESETS: DatePreset[] = [
   "Last 14 Days",
   "Last 30 Days",
   "Month to Date",
-  "Last 10 Years",
+  "Year to Date",
+  "Last 1 Year",
   "Custom Date",
 ];
 
@@ -69,8 +70,10 @@ export function resolveDateRange(
     startDate = addDays(today, -29);
   } else if (preset === "Month to Date") {
     startDate = `${today.slice(0, 8)}01`;
-  } else if (preset === "Last 10 Years") {
-    startDate = addDays(today, -3650);
+  } else if (preset === "Year to Date") {
+    startDate = `${today.slice(0, 4)}-01-01`;
+  } else if (preset === "Last 1 Year") {
+    startDate = addDays(today, -365);
   } else if (preset === "Custom Date") {
     startDate = customStart || today;
     endDate = customEnd || today;

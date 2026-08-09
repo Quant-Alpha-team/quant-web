@@ -4,7 +4,8 @@ export type DatePreset =
   | "Last 14 Days"
   | "Last 30 Days"
   | "Month to Date"
-  | "Last 10 Years"
+  | "Last 1 Year"
+  | "Year to Date"
   | "Custom Date";
 
 export type SectionId =
