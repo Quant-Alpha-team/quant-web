@@ -6,6 +6,5 @@ tag_format = "v$version"
 update_changelog_on_bump = true
 major_version_zero = true
 version_files = [
-  'README.md:^\*\*Version\*\*: (?P<version>.*)',
-  'scripts/build.sh:IMG_VERSION'
+  'README.md:^\*\*Version\*\*: (?P<version>.*)'
 ]
