@@ -1,3 +1,9 @@
+## v1.1.0 (2026-08-09)
+
+### Feat
+
+- **dashboard**: add year-to-date and shorten yearly date range
+
 ## v1.0.3 (2026-08-09)
 
 ### Fix
