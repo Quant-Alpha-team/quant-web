@@ -10,15 +10,11 @@ import {
 import { todayInTimeZone } from "@/lib/dashboard";
 import { logError, logInfo, logWarning } from "@/lib/logger";
 import type {
-  AccountEquity,
   DashboardData,
   DashboardQuery,
   DatasetMetadata,
   SectionId,
-  StrategyDailyPnl,
-  StrategyPosition,
   StrategyScope,
-  TradeExecution,
 } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -37,12 +33,7 @@ const MAX_FILTER_VALUES = 100;
 const MAX_STRATEGY_SCOPES = 1000;
 const MAX_SCOPE_CONCURRENCY = 8;
 
-class ClientInputError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ClientInputError";
-  }
-}
+class ClientInputError extends Error {}
 
 type LoadedDataset<T> = {
   rows: T[];
@@ -317,13 +308,9 @@ function unrequestedMetadata(): DatasetMetadata {
 }
 
 function combineSettled<T>(
-  requested: boolean,
   settled: PromiseSettledResult<BackendRowsResult<T>>[],
   labels: string[],
 ): LoadedDataset<T> {
-  if (!requested) {
-    return { rows: [], meta: unrequestedMetadata() };
-  }
   const rows: T[] = [];
   const errors = new Set<string>();
   let invalidRows = 0;
@@ -401,11 +388,12 @@ function combineSettled<T>(
   };
 }
 
-async function loadScopes<T>(
+async function loadDataset<T, Scope>(
   requested: boolean,
-  scopes: StrategyScope[],
+  scopes: Scope[],
   limit: <R>(task: () => Promise<R>) => Promise<R>,
-  loader: (scope: StrategyScope) => Promise<BackendRowsResult<T>>,
+  loader: (scope: Scope) => Promise<BackendRowsResult<T>>,
+  label: (scope: Scope) => string,
 ): Promise<LoadedDataset<T>> {
   if (!requested) {
     return { rows: [], meta: unrequestedMetadata() };
@@ -413,26 +401,11 @@ async function loadScopes<T>(
   const settled = await Promise.allSettled(
     scopes.map((scope) => limit(() => loader(scope))),
   );
-  const labels = scopes.map(
-    (scope) => `${scope.strategyFamily} / ${scope.strategyVersion}`,
-  );
-  return combineSettled(true, settled, labels);
+  return combineSettled(settled, scopes.map(label));
 }
 
-async function loadSingle<T>(
-  requested: boolean,
-  limit: <R>(task: () => Promise<R>) => Promise<R>,
-  loader: () => Promise<BackendRowsResult<T>>,
-): Promise<LoadedDataset<T>> {
-  if (!requested) {
-    return { rows: [], meta: unrequestedMetadata() };
-  }
-  return combineSettled(
-    true,
-    await Promise.allSettled([limit(loader)]),
-    ["account-wide"],
-  );
-}
+const strategyScopeLabel = (scope: StrategyScope) =>
+  `${scope.strategyFamily} / ${scope.strategyVersion}`;
 
 export async function POST(request: Request) {
   const requestedAt = new Date().toISOString();
@@ -441,6 +414,12 @@ export async function POST(request: Request) {
     const strategyScopes = resolveStrategyScopes(query);
     const limit = createLimiter(concurrencyLimit());
     const rowBudgets = createBackendDatasetRowBudgets();
+    const commonParams = {
+      accountId: query.accountId,
+      startDate: query.startDate,
+      endDate: query.endDate,
+      timezone: query.timezone,
+    };
 
     logInfo("Filters applied", {
       strategy_family: query.strategyFamilies.join(","),
@@ -453,49 +432,48 @@ export async function POST(request: Request) {
     });
 
     const [executions, equity, pnl, positions] = await Promise.all([
-      loadScopes<TradeExecution>(
+      loadDataset(
         query.includeExec,
         strategyScopes,
         limit,
         (scope) => getTradeExecutions({
           ...scope,
-          accountId: query.accountId,
-          startDate: query.startDate,
-          endDate: query.endDate,
-          timezone: query.timezone,
+          ...commonParams,
           rowBudget: rowBudgets.executions,
         }),
+        strategyScopeLabel,
       ),
-      loadSingle<AccountEquity>(query.includePerf, limit, () =>
-        getAccountEquityHistory({
-          ...query,
+      loadDataset(
+        query.includePerf,
+        [null],
+        limit,
+        () => getAccountEquityHistory({
+          ...commonParams,
           rowBudget: rowBudgets.equity,
         }),
+        () => "account-wide",
       ),
-      loadScopes<StrategyDailyPnl>(
+      loadDataset(
         query.includePnl,
         strategyScopes,
         limit,
         (scope) => getStrategyDailyPnl({
           ...scope,
-          accountId: query.accountId,
-          startDate: query.startDate,
-          endDate: query.endDate,
-          timezone: query.timezone,
+          ...commonParams,
           rowBudget: rowBudgets.pnl,
         }),
+        strategyScopeLabel,
       ),
-      loadScopes<StrategyPosition>(
+      loadDataset(
         query.includePositions,
         strategyScopes,
         limit,
         (scope) => getStrategyPositions({
           ...scope,
-          accountId: query.accountId,
-          endDate: query.endDate,
-          timezone: query.timezone,
+          ...commonParams,
           rowBudget: rowBudgets.positions,
         }),
+        strategyScopeLabel,
       ),
     ]);
 

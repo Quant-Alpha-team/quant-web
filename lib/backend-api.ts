@@ -16,7 +16,6 @@ type ApiEnvelope<T> = {
   meta?: {
     has_next?: boolean;
     next_offset?: number | string | null;
-    total?: number | string | null;
     total_count?: number | string | null;
   };
   error?: {
@@ -71,12 +70,9 @@ export type BackendRowBudget = {
   settle: (reserved: number, used: number) => void;
 };
 
-type NormalizedRow<T> = {
-  row: T | null;
-  invalid: boolean;
-};
-
+type NormalizedRow<T> = { row: T | null; invalid: boolean };
 type RowNormalizer<T> = (value: unknown) => NormalizedRow<T>;
+type FieldKind = "string" | "string?" | "number" | "number?";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -95,12 +91,7 @@ function finiteNumber(value: unknown) {
 
 function normalizeKnownFields<T>(
   value: unknown,
-  options: {
-    strings: readonly string[];
-    nullableStrings?: readonly string[];
-    numbers: readonly string[];
-    nullableNumbers?: readonly string[];
-  },
+  schema: Record<string, FieldKind>,
 ): NormalizedRow<T> {
   if (!isRecord(value)) {
     return { row: null, invalid: true };
@@ -110,48 +101,30 @@ function normalizeKnownFields<T>(
   // large backend fields out of the browser response.
   const row: Record<string, unknown> = {};
   let invalid = false;
-  const normalizeString = (key: string, nullable: boolean) => {
+  for (const [key, kind] of Object.entries(schema)) {
     const raw = value[key];
+    const nullable = kind.endsWith("?");
     if (raw === undefined) {
       invalid ||= !nullable;
     } else if (raw === null) {
       if (nullable) row[key] = null;
       else invalid = true;
-    } else if (typeof raw !== "string") {
-      invalid = true;
-    } else if (raw.trim()) {
-      row[key] = raw.trim();
-    } else {
-      invalid ||= !nullable;
-    }
-  };
-  const normalizeNumber = (key: string, nullable: boolean) => {
-    const raw = value[key];
-    if (raw === undefined) {
-      invalid ||= !nullable;
-    } else if (raw === null && nullable) {
-      row[key] = null;
+    } else if (kind.startsWith("string")) {
+      if (typeof raw !== "string") invalid = true;
+      else if (raw.trim()) row[key] = raw.trim();
+      else invalid ||= !nullable;
     } else {
       const normalized = finiteNumber(raw);
       if (normalized === undefined) invalid = true;
       else row[key] = normalized;
     }
-  };
-
-  for (const key of options.strings) {
-    normalizeString(key, false);
-  }
-  for (const key of options.nullableStrings ?? []) {
-    normalizeString(key, true);
-  }
-  for (const key of options.numbers) {
-    normalizeNumber(key, false);
-  }
-  for (const key of options.nullableNumbers ?? []) {
-    normalizeNumber(key, true);
   }
   return { row: invalid ? null : (row as T), invalid };
 }
+
+const rowNormalizer = <T>(
+  schema: Record<string, FieldKind>,
+): RowNormalizer<T> => (value) => normalizeKnownFields<T>(value, schema);
 
 function boolEnv(name: string, fallback = false) {
   const raw = process.env[name];
@@ -348,17 +321,10 @@ async function requestJson<T>(
 }
 
 function responseTotal(meta: ApiEnvelope<unknown>["meta"]) {
-  for (const value of [meta?.total, meta?.total_count]) {
-    const normalized = finiteNumber(value);
-    if (
-      normalized !== undefined &&
-      normalized >= 0 &&
-      Number.isInteger(normalized)
-    ) {
-      return normalized;
-    }
-  }
-  return null;
+  const total = finiteNumber(meta?.total_count);
+  return total !== undefined && total >= 0 && Number.isInteger(total)
+    ? total
+    : null;
 }
 
 async function fetchAllPages<T>(
@@ -469,12 +435,15 @@ async function fetchAllPages<T>(
       }
     }
 
-    const hasExplicitNext = typeof payload.meta?.has_next === "boolean";
-    const hasNext = hasExplicitNext
-      ? payload.meta?.has_next === true
-      : total !== null
-        ? receivedRows < total
-        : pageRows.length >= requestLimit;
+    const hasNext = payload.meta?.has_next;
+    if (typeof hasNext !== "boolean") {
+      logWarning("Backend pagination has_next metadata was invalid", {
+        path,
+        offset,
+        has_next: hasNext ?? null,
+      });
+      return result(false, "Backend pagination metadata was invalid.");
+    }
     const paginationError = (() => {
       if (hasNext && pageRows.length === 0) {
         return "Backend pagination reported another page after an empty page.";
@@ -536,67 +505,67 @@ async function fetchAllPages<T>(
   return result(false, "Backend pagination safety limit was exceeded.");
 }
 
-const normalizeTradeExecution: RowNormalizer<TradeExecution> = (value) =>
-  normalizeKnownFields<TradeExecution>(value, {
-    strings: [
-      "timestamp",
-      "strategy_name",
-      "strategy_family",
-      "broker_account_id",
-      "symbol",
-      "sec_type",
-      "side",
-      "status",
-    ],
-    nullableStrings: ["strategy_version", "notes"],
-    numbers: ["quantity", "price"],
-    nullableNumbers: ["commission", "realized_pnl"],
-  });
+const normalizeTradeExecution = rowNormalizer<TradeExecution>({
+  timestamp: "string",
+  strategy_name: "string",
+  strategy_family: "string",
+  broker_account_id: "string",
+  symbol: "string",
+  sec_type: "string",
+  side: "string",
+  status: "string",
+  strategy_version: "string?",
+  notes: "string?",
+  quantity: "number",
+  price: "number",
+  commission: "number?",
+  realized_pnl: "number?",
+});
 
-const normalizeAccountEquity: RowNormalizer<AccountEquity> = (value) =>
-  normalizeKnownFields<AccountEquity>(value, {
-    strings: ["date", "timestamp", "broker_account_id"],
-    numbers: ["equity_value"],
-  });
+const normalizeAccountEquity = rowNormalizer<AccountEquity>({
+  date: "string",
+  timestamp: "string",
+  broker_account_id: "string",
+  equity_value: "number",
+});
 
-const normalizeStrategyDailyPnl: RowNormalizer<StrategyDailyPnl> = (value) =>
-  normalizeKnownFields<StrategyDailyPnl>(value, {
-    strings: [
-      "date",
-      "strategy_name",
-      "strategy_family",
-      "broker_account_id",
-      "valuation_status",
-      "calculation_source",
-    ],
-    nullableStrings: ["strategy_version"],
-    numbers: [],
-    nullableNumbers: ["daily_pnl", "realized_pnl", "unrealized_pnl", "commission"],
-  });
+const normalizeStrategyDailyPnl = rowNormalizer<StrategyDailyPnl>({
+  date: "string",
+  strategy_name: "string",
+  strategy_family: "string",
+  broker_account_id: "string",
+  valuation_status: "string",
+  calculation_source: "string",
+  strategy_version: "string?",
+  daily_pnl: "number?",
+  realized_pnl: "number?",
+  unrealized_pnl: "number?",
+  commission: "number?",
+});
 
-const normalizeStrategyPosition: RowNormalizer<StrategyPosition> = (value) =>
-  normalizeKnownFields<StrategyPosition>(value, {
-    strings: [
-      "snapshot_at",
-      "strategy_name",
-      "strategy_family",
-      "broker_account_id",
-      "symbol",
-      "sec_type",
-      "currency",
-      "source",
-    ],
-    nullableStrings: ["strategy_version", "local_symbol", "expiry_date", "right"],
-    numbers: ["quantity", "average_cost", "cost_basis"],
-    nullableNumbers: [
-      "strike",
-      "mark_price",
-      "market_value",
-      "day_change",
-      "unrealized_pnl",
-      "gain_loss_percent",
-    ],
-  });
+const normalizeStrategyPosition = rowNormalizer<StrategyPosition>({
+  snapshot_at: "string",
+  strategy_name: "string",
+  strategy_family: "string",
+  broker_account_id: "string",
+  symbol: "string",
+  sec_type: "string",
+  currency: "string",
+  source: "string",
+  strategy_version: "string?",
+  local_symbol: "string?",
+  expiry_date: "string?",
+  right: "string?",
+  quantity: "number",
+  average_cost: "number",
+  cost_basis: "number",
+  strike: "number?",
+  mark_price: "number?",
+  market_value: "number?",
+  day_change: "number?",
+  unrealized_pnl: "number?",
+  gain_loss_percent: "number?",
+});
 
 type DateRangeParams = {
   accountId: string;
@@ -620,132 +589,53 @@ function scopeParams(params: ScopedDateRangeParams) {
   };
 }
 
-function strategyIdentityFromName(strategyName: string) {
-  const match = strategyName.match(/^(.*)_(V\d+)$/i);
-  return match
-    ? { family: match[1], version: match[2].toUpperCase() }
-    : { family: strategyName, version: null };
+function invalidFilterMetadata(): never {
+  throw new BackendApiError(
+    "Filters API violated the strategy_families contract.",
+    "Backend returned invalid filter metadata.",
+  );
 }
 
-function legacyStrategyFamilies(strategies: string[]): StrategyFamilyOption[] {
-  const byFamily = new Map<string, StrategyFamilyOption>();
-
-  for (const strategyName of strategies) {
-    const identity = strategyIdentityFromName(strategyName);
-    const entry = byFamily.get(identity.family) ?? {
-      family: identity.family,
-      versions: [],
-    };
-    entry.versions.push({
-      version: identity.version,
-      strategy_name: strategyName,
-      is_active: true,
-    });
-    byFamily.set(identity.family, entry);
-  }
-
-  return [...byFamily.values()]
-    .map((entry) => ({
-      ...entry,
-      versions: entry.versions.sort((left, right) =>
-        (left.version ?? "").localeCompare(right.version ?? "", undefined, {
-          numeric: true,
-        }),
-      ),
-    }))
-    .sort((left, right) => left.family.localeCompare(right.family));
-}
-
-function normalizeStrategyFamilies(
-  value: unknown,
-  strategies: string[],
-): StrategyFamilyOption[] {
-  if (!Array.isArray(value)) {
-    return legacyStrategyFamilies(strategies);
-  }
-
-  const families: StrategyFamilyOption[] = [];
-  for (const rawFamily of value) {
-    if (!rawFamily || typeof rawFamily !== "object") {
-      continue;
-    }
-    const familyRecord = rawFamily as Record<string, unknown>;
-    const family =
-      typeof familyRecord.family === "string" ? familyRecord.family.trim() : "";
-    if (!family || !Array.isArray(familyRecord.versions)) {
-      continue;
-    }
-
-    const versions = familyRecord.versions.flatMap((rawVersion) => {
-      if (!rawVersion || typeof rawVersion !== "object") {
-        return [];
+function normalizeStrategyFamilies(value: unknown[]): StrategyFamilyOption[] {
+  return value
+    .map((rawFamily) => {
+      if (!isRecord(rawFamily)) {
+        return invalidFilterMetadata();
       }
-      const versionRecord = rawVersion as Record<string, unknown>;
-      const strategyName =
-        typeof versionRecord.strategy_name === "string"
-          ? versionRecord.strategy_name.trim()
-          : "";
-      const version =
-        versionRecord.version === null
-          ? null
-          : typeof versionRecord.version === "string" &&
-              versionRecord.version.trim()
-            ? versionRecord.version.trim()
-            : undefined;
-      if (!strategyName || version === undefined) {
-        return [];
+      const family =
+        typeof rawFamily.family === "string" ? rawFamily.family.trim() : "";
+      if (
+        !family ||
+        !Array.isArray(rawFamily.versions) ||
+        rawFamily.versions.length === 0
+      ) {
+        return invalidFilterMetadata();
       }
-      return [
-        {
-          version,
+      const versions = rawFamily.versions.map((rawVersion) => {
+        if (!isRecord(rawVersion)) {
+          return invalidFilterMetadata();
+        }
+        const strategyName =
+          typeof rawVersion.strategy_name === "string"
+            ? rawVersion.strategy_name.trim()
+            : "";
+        const version = rawVersion.version;
+        if (
+          !strategyName ||
+          (version !== null &&
+            (typeof version !== "string" || !version.trim())) ||
+          typeof rawVersion.is_active !== "boolean"
+        ) {
+          return invalidFilterMetadata();
+        }
+        return {
+          version: version === null ? null : version.trim(),
           strategy_name: strategyName,
-          is_active:
-            typeof versionRecord.is_active === "boolean"
-              ? versionRecord.is_active
-              : true,
-        },
-      ];
-    });
-    if (versions.length > 0) {
-      families.push({ family, versions });
-    }
-  }
-
-  const modernStrategyNames = new Set(
-    families.flatMap((family) =>
-      family.versions.map((version) => version.strategy_name),
-    ),
-  );
-  const uncoveredStrategies = strategies.filter(
-    (strategyName) => !modernStrategyNames.has(strategyName),
-  );
-  const merged = new Map<string, StrategyFamilyOption>();
-  for (const entry of [
-    ...families,
-    ...legacyStrategyFamilies(uncoveredStrategies),
-  ]) {
-    const existing = merged.get(entry.family);
-    if (!existing) {
-      merged.set(entry.family, {
-        family: entry.family,
-        versions: [...entry.versions],
+          is_active: rawVersion.is_active,
+        };
       });
-      continue;
-    }
-    const known = new Set(
-      existing.versions.map(
-        (version) => `${version.version ?? ""}\u0000${version.strategy_name}`,
-      ),
-    );
-    for (const version of entry.versions) {
-      const key = `${version.version ?? ""}\u0000${version.strategy_name}`;
-      if (!known.has(key)) {
-        existing.versions.push(version);
-        known.add(key);
-      }
-    }
-  }
-  return [...merged.values()]
+      return { family, versions };
+    })
     .map((entry) => ({
       ...entry,
       versions: entry.versions.sort((left, right) =>
@@ -792,29 +682,16 @@ function normalizeAccounts(value: unknown): AccountOption[] {
 export async function getFilters(): Promise<FilterOptions> {
   const payload = await requestJson<unknown>("/api/trading/meta/filters/");
   const data = payload.data;
-  if (!isRecord(data)) {
-    throw new BackendApiError(
-      "Unexpected response format from filters API.",
-      "Backend returned invalid filter metadata.",
-    );
+  if (
+    !isRecord(data) ||
+    !Array.isArray(data.strategy_families) ||
+    !Array.isArray(data.accounts)
+  ) {
+    return invalidFilterMetadata();
   }
-  const strategies = data.strategies;
-  const accounts = data.accounts;
-  if (!Array.isArray(strategies) || !Array.isArray(accounts)) {
-    throw new BackendApiError(
-      "Unexpected response format from filters API.",
-      "Backend returned invalid filter metadata.",
-    );
-  }
-  const normalizedStrategies = [...new Set(strategies.flatMap((strategy) =>
-    typeof strategy === "string" && strategy.trim() ? [strategy.trim()] : [],
-  ))];
   return {
-    strategy_families: normalizeStrategyFamilies(
-      data.strategy_families,
-      normalizedStrategies,
-    ),
-    accounts: normalizeAccounts(accounts),
+    strategy_families: normalizeStrategyFamilies(data.strategy_families),
+    accounts: normalizeAccounts(data.accounts),
   };
 }
 
@@ -861,17 +738,8 @@ export async function syncTradingData(): Promise<ReconciliationSyncResult> {
   };
 }
 
-function fetchDataset<T>(
-  path: string,
-  queryParams: Record<string, string | number>,
-  normalizeRow: RowNormalizer<T>,
-  rowBudget: BackendRowBudget,
-) {
-  return fetchAllPages(path, queryParams, normalizeRow, rowBudget);
-}
-
 export function getTradeExecutions(params: ScopedDateRangeParams) {
-  return fetchDataset(
+  return fetchAllPages(
     "/api/trading/trades/executions/",
     { ...scopeParams(params), order: "desc" },
     normalizeTradeExecution,
@@ -880,7 +748,7 @@ export function getTradeExecutions(params: ScopedDateRangeParams) {
 }
 
 export function getAccountEquityHistory(params: DateRangeParams) {
-  return fetchDataset(
+  return fetchAllPages(
     "/api/trading/accounts/equity-history/",
     {
       account_id: params.accountId,
@@ -895,7 +763,7 @@ export function getAccountEquityHistory(params: DateRangeParams) {
 }
 
 export function getStrategyDailyPnl(params: ScopedDateRangeParams) {
-  return fetchDataset(
+  return fetchAllPages(
     "/api/trading/strategies/daily-pnl/",
     { ...scopeParams(params), order: "asc" },
     normalizeStrategyDailyPnl,
@@ -904,7 +772,7 @@ export function getStrategyDailyPnl(params: ScopedDateRangeParams) {
 }
 
 export function getStrategyPositions(params: PositionParams) {
-  return fetchDataset(
+  return fetchAllPages(
     "/api/trading/portfolio/positions/",
     {
       strategy_family: params.strategyFamily,
