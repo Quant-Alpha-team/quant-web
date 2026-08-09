@@ -1,7 +1,6 @@
 import type {
   AccountEquity,
   DatePreset,
-  KpiCards,
   SectionId,
   StrategyDailyPnl,
   StrategyPosition,
@@ -34,10 +33,6 @@ export const CHART_COLORS = {
   loss: "#fb7185",
 };
 
-function pad(value: number) {
-  return String(value).padStart(2, "0");
-}
-
 export function todayInTimeZone(timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone,
@@ -53,9 +48,7 @@ function addDays(dateValue: string, days: number) {
   const [year, month, day] = dateValue.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
   date.setUTCDate(date.getUTCDate() + days);
-  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(
-    date.getUTCDate(),
-  )}`;
+  return date.toISOString().slice(0, 10);
 }
 
 export function resolveDateRange(
@@ -238,13 +231,13 @@ export function computeKpis(
   execRows: TradeExecution[],
   pnlRows: StrategyDailyPnl[],
   positionRows: StrategyPosition[],
-): KpiCards {
-  const kpi: KpiCards = {
-    accountNav: null,
-    navChange: null,
-    navChangePercent: null,
-    openPnl: null,
-    periodRealizedPnl: null,
+) {
+  const kpi = {
+    accountNav: null as number | null,
+    navChange: null as number | null,
+    navChangePercent: null as number | null,
+    openPnl: null as number | null,
+    periodRealizedPnl: null as number | null,
     periodRealizedRecords: 0,
     totalTrades: execRows.length,
     openPositions: positionRows.length,
@@ -393,11 +386,10 @@ export function downsample<T>(rows: T[], maxPoints: number) {
   }
 
   const lastIndex = rows.length - 1;
-  const positions = new Set<number>();
-  for (let index = 0; index < maxPoints; index += 1) {
-    positions.add(Math.floor((index * lastIndex) / (maxPoints - 1)));
-  }
-  return [...positions].sort((a, b) => a - b).map((index) => rows[index]);
+  return Array.from(
+    { length: maxPoints },
+    (_, index) => rows[Math.floor((index * lastIndex) / (maxPoints - 1))],
+  );
 }
 
 export function sortByNewest<

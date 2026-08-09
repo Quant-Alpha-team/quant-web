@@ -105,6 +105,16 @@ const surfaceClass =
   "rounded-md bg-[radial-gradient(circle_at_100%_0%,rgba(94,234,212,0.1),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.095),rgba(255,255,255,0.055))] p-4 shadow-[0_18px_42px_var(--shadow)] backdrop-blur-xl";
 const statusPillClass =
   "flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 font-mono text-[10px] uppercase tracking-normal text-[var(--muted-strong)]";
+const operationalStatusVisuals = {
+  current: { className: "text-emerald-200", tone: "green" },
+  failed: { className: "text-rose-200", tone: "rose" },
+  partial: { className: "text-amber-200", tone: "amber" },
+  loading: { className: "text-cyan-200", tone: "cyan" },
+  pending: { className: "text-cyan-200", tone: "cyan" },
+  complete: { className: "text-emerald-200", tone: "green" },
+  running: { className: "text-cyan-200", tone: "cyan" },
+  "not run": { className: "text-[var(--muted-strong)]", tone: "amber" },
+} as const;
 const metaPillClass =
   "rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 font-mono text-[10px] uppercase tracking-normal text-[var(--muted)]";
 const primaryButtonClass =
@@ -142,6 +152,95 @@ function downloadCsv(fileName: string, headers: string[], rows: unknown[][]) {
   link.download = fileName;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+type CellValue = string | number | null | undefined;
+
+type CsvField<T> = {
+  label: string;
+  csvValue: (row: T) => unknown;
+};
+
+function csvField<T>(
+  label: string,
+  csvValue: (row: T) => unknown,
+): CsvField<T> {
+  return { label, csvValue };
+}
+
+type DashboardColumn<T> = TableColumn<T> & CsvField<T>;
+
+type ValueColumnOptions<T> = Omit<
+  TableColumn<T>,
+  "key" | "label" | "render" | "sortValue"
+> & {
+  sortable?: boolean;
+  missing?: ReactNode;
+  render?: (value: CellValue, row: T) => ReactNode;
+  csvValue?: (value: CellValue, row: T) => unknown;
+  csvMissing?: unknown;
+};
+
+function valueColumn<T>(
+  key: string,
+  label: string,
+  read: (row: T) => CellValue,
+  options: ValueColumnOptions<T> = {},
+): DashboardColumn<T> {
+  const {
+    sortable,
+    missing = "—",
+    render,
+    csvMissing = "",
+    csvValue,
+    ...column
+  } = options;
+  return {
+    key,
+    label,
+    ...column,
+    sortValue: sortable ? read : undefined,
+    render: (row) => {
+      const value = read(row);
+      return render ? render(value, row) : (value ?? missing);
+    },
+    csvValue: (row) => {
+      const value = read(row);
+      return csvValue ? csvValue(value, row) : (value ?? csvMissing);
+    },
+  };
+}
+
+function CsvDownloadButton<T>({
+  fileName,
+  fields,
+  rows,
+  disabled = false,
+  className = secondaryButtonClass,
+}: {
+  fileName: string;
+  fields: readonly CsvField<T>[];
+  rows: readonly T[];
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() =>
+        downloadCsv(
+          fileName,
+          fields.map((field) => field.label),
+          rows.map((row) => fields.map((field) => field.csvValue(row))),
+        )
+      }
+      className={className}
+    >
+      <Download className="h-4 w-4" />
+      Download CSV
+    </button>
+  );
 }
 
 function Panel({
@@ -408,108 +507,84 @@ function OverviewPanel({
           ? "No commission in selected range"
           : `${formatCurrency(Math.abs(commissionValue ?? 0) / data.execRows.length)} average per trade`;
   const unrealizedValue = positionsComplete ? kpi.openPnl : null;
+  const overviewMetrics = [
+    {
+      label: "Account-wide Current Equity",
+      value: currentEquityAvailable
+        ? formatCurrency(currentEquityValue)
+        : "Unavailable",
+      delta: datasetDetail(
+        `${
+          currentEquityAvailable
+            ? navDetail
+            : "Latest NAV close is not guaranteed"
+        } · Not affected by strategy filters`,
+        equity,
+      ),
+      deltaTone: currentEquityAvailable
+        ? metricTone(kpi.navChange)
+        : "neutral",
+      iconTone: "cyan",
+    },
+    {
+      label: "Total Realized P&L",
+      value: realizedValue === null ? "Unavailable" : formatCurrency(realizedValue),
+      delta: datasetDetail(realizedDetail, pnl),
+      tone: metricTone(realizedValue),
+      deltaTone: metricTone(realizedValue),
+    },
+    {
+      label: "Total Unrealized P&L",
+      value:
+        !positionsAvailable || !positionsComplete
+          ? "Unavailable"
+          : unrealizedValue === null
+            ? "Pricing incomplete"
+            : formatCurrency(unrealizedValue),
+      delta: datasetDetail(
+        !positionsAvailable
+          ? "Position data unavailable"
+          : !positionsComplete
+            ? `${kpi.pricedPositions}/${kpi.openPositions} fetched positions valued; the full-range total is unavailable`
+            : kpi.openPositions === 0
+              ? "No open positions"
+              : `${kpi.pricedPositions}/${kpi.openPositions} positions valued`,
+        positions,
+      ),
+      tone: metricTone(unrealizedValue),
+    },
+    {
+      label: "Total Trades",
+      value: !executionsAvailable
+        ? "Unavailable"
+        : `${kpi.totalTrades}${executionsComplete ? "" : "+"}`,
+      delta: datasetDetail(tradesDetail, executions),
+    },
+    {
+      label: "Open Positions",
+      value: !positionsAvailable
+        ? "Unavailable"
+        : `${kpi.openPositions}${positionsComplete ? "" : "+"}`,
+      delta: datasetDetail(
+        `${kpi.openStrategies} ${kpi.openStrategies === 1 ? "family" : "families"} in ${positionsComplete ? "selected range" : "fetched records"}`,
+        positions,
+      ),
+    },
+    {
+      label: "Total Commission",
+      value: commissionValue === null ? "Unavailable" : formatCurrency(commissionValue),
+      delta: datasetDetail(commissionDetail, executions),
+    },
+  ] satisfies Array<Parameters<typeof MetricCard>[0]>;
 
   return (
     <Panel title={`Portfolio Overview: ${strategyScope} (${accountId})`}>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-        <div className="lg:col-span-2">
-          <MetricCard
-            label="Account-wide Current Equity"
-            value={
-              currentEquityAvailable
-                ? formatCurrency(currentEquityValue)
-                : "Unavailable"
-            }
-            delta={datasetDetail(
-              `${
-                currentEquityAvailable
-                  ? navDetail
-                  : "Latest NAV close is not guaranteed"
-              } · Not affected by strategy filters`,
-              equity,
-            )}
-            tone="neutral"
-            deltaTone={
-              currentEquityAvailable ? metricTone(kpi.navChange) : "neutral"
-            }
-            iconTone="cyan"
-          />
-        </div>
-        <div className="lg:col-span-2">
-          <MetricCard
-            label="Total Realized P&L"
-            value={
-              realizedValue === null
-                ? "Unavailable"
-                : formatCurrency(realizedValue)
-            }
-            delta={datasetDetail(realizedDetail, pnl)}
-            tone={metricTone(realizedValue)}
-            deltaTone={metricTone(realizedValue)}
-          />
-        </div>
-        <div className="lg:col-span-2">
-          <MetricCard
-            label="Total Unrealized P&L"
-            value={
-              !positionsAvailable || !positionsComplete
-                ? "Unavailable"
-                : unrealizedValue === null
-                ? "Pricing incomplete"
-                : formatCurrency(unrealizedValue)
-            }
-            delta={datasetDetail(
-              !positionsAvailable
-                ? "Position data unavailable"
-                : !positionsComplete
-                  ? `${kpi.pricedPositions}/${kpi.openPositions} fetched positions valued; the full-range total is unavailable`
-                : kpi.openPositions === 0
-                ? "No open positions"
-                : `${kpi.pricedPositions}/${kpi.openPositions} positions valued`,
-              positions,
-            )}
-            tone={metricTone(unrealizedValue)}
-          />
-        </div>
-        <div className="lg:col-span-2">
-          <MetricCard
-            label="Total Trades"
-            value={
-              !executionsAvailable
-                ? "Unavailable"
-                : `${kpi.totalTrades}${executionsComplete ? "" : "+"}`
-            }
-            delta={datasetDetail(tradesDetail, executions)}
-            tone="neutral"
-          />
-        </div>
-        <div className="lg:col-span-2">
-          <MetricCard
-            label="Open Positions"
-            value={
-              !positionsAvailable
-                ? "Unavailable"
-                : `${kpi.openPositions}${positionsComplete ? "" : "+"}`
-            }
-            delta={datasetDetail(
-              `${kpi.openStrategies} ${kpi.openStrategies === 1 ? "family" : "families"} in ${positionsComplete ? "selected range" : "fetched records"}`,
-              positions,
-            )}
-            tone="neutral"
-          />
-        </div>
-        <div className="lg:col-span-2">
-          <MetricCard
-            label="Total Commission"
-            value={
-              commissionValue === null
-                ? "Unavailable"
-                : formatCurrency(commissionValue)
-            }
-            delta={datasetDetail(commissionDetail, executions)}
-            tone="neutral"
-          />
-        </div>
+        {overviewMetrics.map((metric) => (
+          <div key={metric.label} className="lg:col-span-2">
+            <MetricCard {...metric} />
+          </div>
+        ))}
       </div>
 
       {!equityAvailable ? (
@@ -588,6 +663,38 @@ function pnlDataBasis(row: StrategyDailyPnl) {
   return "Mark to market";
 }
 
+type StrategyTableRow = {
+  strategy_name?: string;
+  strategy_family?: string;
+  strategy_version?: string | null;
+};
+
+function strategyColumns<T extends StrategyTableRow>(
+  stickyOffset: string,
+  missing: ReactNode = "—",
+  csvMissing = "",
+): DashboardColumn<T>[] {
+  return [
+    valueColumn<T>("family", "Family", strategyFamily, {
+      width: "250px",
+      sticky: "left",
+      stickyOffset,
+      stickyEdge: true,
+      sortable: true,
+    }),
+    valueColumn<T>("version", "Version", strategyVersionLabel, {
+      width: "110px",
+      sortable: true,
+    }),
+    valueColumn<T>("strategyIdentity", "Strategy ID", (row) => row.strategy_name, {
+      width: "280px",
+      sortable: true,
+      missing,
+      csvMissing,
+    }),
+  ];
+}
+
 const strategyPnlHelp =
   "Daily P&L is net of commission and includes the daily open-position mark change when pricing is available. Realized P&L is the day's realized result after commission; opening-only fees do not create realized P&L. Unrealized P&L is shown separately. Empty zero-only archive rows are omitted.";
 
@@ -628,111 +735,53 @@ function StrategyPnlPanel({
   }
 
   const orderedRows = sortByNewest(informativeRows);
-  const summaryColumns: TableColumn<(typeof summary)[number]>[] = [
-    {
-      key: "strategy",
-      label: "Strategy Family",
+  type SummaryRow = (typeof summary)[number];
+  const summaryColumns: DashboardColumn<SummaryRow>[] = [
+    valueColumn<SummaryRow>("strategy", "Strategy Family", (row) => row.strategy, {
       width: "24%",
-      sortValue: (row) => row.strategy,
-      render: (row) => row.strategy,
-    },
-    {
-      key: "pnl",
-      label: "P&L",
-      align: "right",
-      width: "20%",
-      sortValue: (row) => row.pnl,
-      render: (row) => formatCurrency(row.pnl),
-    },
-    {
-      key: "wins",
-      label: "Wins",
-      align: "right",
-      width: "18%",
-      sortValue: (row) => row.wins,
-      render: (row) => row.wins,
-    },
-    {
-      key: "losses",
-      label: "Losses",
-      align: "right",
-      width: "18%",
-      sortValue: (row) => row.losses,
-      render: (row) => row.losses,
-    },
-    {
-      key: "winRate",
-      label: "Win Rate",
-      align: "right",
-      width: "20%",
-      sortValue: (row) => row.winRate,
-      render: (row) => `${row.winRate.toFixed(1)}%`,
-    },
+      sortable: true,
+    }),
+    valueColumn<SummaryRow>("pnl", "P&L", (row) => row.pnl, {
+      align: "right", width: "20%", sortable: true,
+      render: (_, row) => formatCurrency(row.pnl),
+    }),
+    valueColumn<SummaryRow>("wins", "Wins", (row) => row.wins, {
+      align: "right", width: "18%", sortable: true,
+    }),
+    valueColumn<SummaryRow>("losses", "Losses", (row) => row.losses, {
+      align: "right", width: "18%", sortable: true,
+    }),
+    valueColumn<SummaryRow>("winRate", "Win Rate", (row) => row.winRate, {
+      align: "right", width: "20%", sortable: true,
+      render: (_, row) => `${row.winRate.toFixed(1)}%`,
+    }),
   ];
 
-  const rawColumns: TableColumn<StrategyDailyPnl>[] = [
-    {
-      key: "date",
-      label: "Date",
+  const rawColumns: DashboardColumn<StrategyDailyPnl>[] = [
+    valueColumn<StrategyDailyPnl>("date", "Date", (row) => row.date, {
       width: "140px",
       sticky: "left",
-      sortValue: (row) => row.date,
-      render: (row) => formatDate(row.date),
-    },
-    {
-      key: "family",
-      label: "Family",
-      width: "250px",
-      sticky: "left",
-      stickyOffset: "140px",
-      stickyEdge: true,
-      sortValue: (row) => strategyFamily(row),
-      render: (row) => strategyFamily(row),
-    },
-    {
-      key: "version",
-      label: "Version",
-      width: "110px",
-      sortValue: (row) => strategyVersionLabel(row),
-      render: (row) => strategyVersionLabel(row),
-    },
-    {
-      key: "strategyIdentity",
-      label: "Strategy ID",
-      width: "280px",
-      sortValue: (row) => row.strategy_name,
-      render: (row) => row.strategy_name ?? "—",
-    },
-    {
-      key: "account",
-      label: "Account",
-      render: (row) => row.broker_account_id ?? "—",
-    },
-    {
-      key: "dailyPnl",
-      label: "Daily P&L",
+      sortable: true,
+      render: (_, row) => formatDate(row.date),
+      csvValue: (_, row) => formatDate(row.date),
+    }),
+    ...strategyColumns<StrategyDailyPnl>("140px"),
+    valueColumn<StrategyDailyPnl>("account", "Account", (row) => row.broker_account_id),
+    valueColumn<StrategyDailyPnl>("dailyPnl", "Daily P&L", (row) => row.daily_pnl, {
+      align: "right", render: (value) => pnlTableValue(value),
+    }),
+    valueColumn<StrategyDailyPnl>("realizedPnl", "Realized P&L", (row) => row.realized_pnl, {
+      align: "right", render: (value) => pnlTableValue(value),
+    }),
+    valueColumn<StrategyDailyPnl>("unrealizedPnl", "Unrealized P&L", (row) => row.unrealized_pnl, {
       align: "right",
-      render: (row) => pnlTableValue(row.daily_pnl),
-    },
-    {
-      key: "realizedPnl",
-      label: "Realized P&L",
-      align: "right",
-      render: (row) => pnlTableValue(row.realized_pnl),
-    },
-    {
-      key: "unrealizedPnl",
-      label: "Unrealized P&L",
-      align: "right",
-      render: (row) => pnlTableValue(row.unrealized_pnl, isMarkToMarketRow(row)),
-    },
-    {
-      key: "commission",
-      label: "Commission",
-      align: "right",
-      render: (row) => commissionTableValue(row.commission),
-    },
-    { key: "basis", label: "Data Basis", render: pnlDataBasis },
+      render: (value, row) => pnlTableValue(value, isMarkToMarketRow(row)),
+      csvValue: (value, row) => isMarkToMarketRow(row) ? (value ?? "") : "",
+    }),
+    valueColumn<StrategyDailyPnl>("commission", "Commission", (row) => row.commission, {
+      align: "right", render: (value) => commissionTableValue(value),
+    }),
+    valueColumn<StrategyDailyPnl>("basis", "Data Basis", pnlDataBasis),
   ];
 
   return (
@@ -748,34 +797,11 @@ function StrategyPnlPanel({
           <div className="font-mono text-[11px] uppercase tracking-normal text-[var(--muted-strong)]">
             {orderedRows.length} informative records
           </div>
-          <button
-            type="button"
-            onClick={() =>
-              downloadCsv(
-                "performance-logs.csv",
-                rawColumns.map((column) => column.label),
-                orderedRows.map((row) => {
-                  const marked = isMarkToMarketRow(row);
-                  return [
-                    formatDate(row.date),
-                    strategyFamily(row),
-                    strategyVersionLabel(row),
-                    row.strategy_name ?? "",
-                    row.broker_account_id ?? "",
-                    row.daily_pnl ?? "",
-                    row.realized_pnl ?? "",
-                    marked ? (row.unrealized_pnl ?? "") : "",
-                    row.commission ?? "",
-                    pnlDataBasis(row),
-                  ];
-                }),
-              )
-            }
-            className={secondaryButtonClass}
-          >
-            <Download className="h-4 w-4" />
-            Download CSV
-          </button>
+          <CsvDownloadButton
+            fileName="performance-logs.csv"
+            fields={rawColumns}
+            rows={orderedRows}
+          />
         </div>
         <DataTable
           key={`pnl-${informativeRows.length}-${orderedRows[0]?.date ?? "empty"}`}
@@ -1049,25 +1075,25 @@ function StrategyPositionsPanel({
     });
   }
 
-  const csvHeaders = [
-    "Family",
-    "Version",
-    "Strategy ID",
-    "Account",
-    "Symbol",
-    "Description",
-    "Type",
-    "Currency",
-    "Quantity",
-    "Price",
-    "Market Value",
-    "Cost Basis",
-    "P/L Day",
-    "P/L",
-    "P/L %",
-    "Expiration",
-    "As Of",
-    "Position Source",
+  const csvFields: CsvField<StrategyPosition>[] = [
+    csvField("Family", strategyFamily),
+    csvField("Version", strategyVersionLabel),
+    csvField("Strategy ID", (row) => row.strategy_name ?? "Unattributed"),
+    csvField("Account", (row) => row.broker_account_id ?? "-"),
+    csvField("Symbol", positionInstrumentLabel),
+    csvField("Description", positionDescription),
+    csvField("Type", (row) => row.sec_type ?? "-"),
+    csvField("Currency", (row) => row.currency ?? ""),
+    csvField("Quantity", (row) => toOptionalNumber(row.quantity)),
+    csvField("Price", (row) => toOptionalNumber(row.mark_price)),
+    csvField("Market Value", (row) => toOptionalNumber(row.market_value)),
+    csvField("Cost Basis", (row) => toOptionalNumber(row.cost_basis)),
+    csvField("P/L Day", (row) => toOptionalNumber(row.day_change)),
+    csvField("P/L", (row) => toOptionalNumber(row.unrealized_pnl)),
+    csvField("P/L %", (row) => toOptionalNumber(row.gain_loss_percent)),
+    csvField("Expiration", (row) => row.expiry_date ?? ""),
+    csvField("As Of", (row) => formatTimestamp(row.snapshot_at, timezone)),
+    csvField("Position Source", (row) => row.source ?? "LEDGER"),
   ];
 
   return (
@@ -1110,39 +1136,11 @@ function StrategyPositionsPanel({
                 )}
                 {allStrategiesCollapsed ? "Expand all" : "Collapse all"}
               </button>
-              <button
-                type="button"
-                onClick={() =>
-                  downloadCsv(
-                    "current-holdings-by-family.csv",
-                    csvHeaders,
-                    orderedRows.map((row) => [
-                      strategyFamily(row),
-                      strategyVersionLabel(row),
-                      row.strategy_name ?? "Unattributed",
-                      row.broker_account_id ?? "-",
-                      positionInstrumentLabel(row),
-                      positionDescription(row),
-                      row.sec_type ?? "-",
-                      row.currency ?? "",
-                      toOptionalNumber(row.quantity),
-                      toOptionalNumber(row.mark_price),
-                      toOptionalNumber(row.market_value),
-                      toOptionalNumber(row.cost_basis),
-                      toOptionalNumber(row.day_change),
-                      toOptionalNumber(row.unrealized_pnl),
-                      toOptionalNumber(row.gain_loss_percent),
-                      row.expiry_date ?? "",
-                      formatTimestamp(row.snapshot_at, timezone),
-                      row.source ?? "LEDGER",
-                    ]),
-                  )
-                }
-                className={secondaryButtonClass}
-              >
-                <Download className="h-4 w-4" />
-                Download CSV
-              </button>
+              <CsvDownloadButton
+                fileName="current-holdings-by-family.csv"
+                fields={csvFields}
+                rows={orderedRows}
+              />
             </div>
           </div>
 
@@ -1162,6 +1160,24 @@ function StrategyPositionsPanel({
             const dayChange = sumPositionValues(strategyRows, (row) => row.day_change);
             const costBasis = sumPositionValues(strategyRows, (row) => row.cost_basis);
             const gainLoss = sumPositionValues(strategyRows, (row) => row.unrealized_pnl);
+            const positionMetric = (
+              label: string,
+              summary: ReturnType<typeof sumPositionValues>,
+              withTone = false,
+            ) => ({
+              label,
+              value: groupCurrency
+                ? formatPositionCurrency(summary.total, groupCurrency)
+                : currencySummary,
+              complete: summary.complete,
+              tone: withTone ? positionValueClass(summary.total) : "",
+            });
+            const positionMetrics = [
+              positionMetric("Market value", marketValue),
+              positionMetric("Day change", dayChange, true),
+              positionMetric("Cost basis", costBasis),
+              positionMetric("Unrealized P/L", gainLoss, true),
+            ];
             const accounts = [...new Set(strategyRows.map((row) => row.broker_account_id).filter(Boolean))];
             const variants = [
               ...new Map(
@@ -1238,40 +1254,7 @@ function StrategyPositionsPanel({
                     </button>
 
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:min-w-[620px]">
-                      {[
-                        {
-                          label: "Market value",
-                          value: groupCurrency
-                            ? formatPositionCurrency(marketValue.total, groupCurrency)
-                            : currencySummary,
-                          complete: marketValue.complete,
-                          tone: "",
-                        },
-                        {
-                          label: "Day change",
-                          value: groupCurrency
-                            ? formatPositionCurrency(dayChange.total, groupCurrency)
-                            : currencySummary,
-                          complete: dayChange.complete,
-                          tone: positionValueClass(dayChange.total),
-                        },
-                        {
-                          label: "Cost basis",
-                          value: groupCurrency
-                            ? formatPositionCurrency(costBasis.total, groupCurrency)
-                            : currencySummary,
-                          complete: costBasis.complete,
-                          tone: "",
-                        },
-                        {
-                          label: "Unrealized P/L",
-                          value: groupCurrency
-                            ? formatPositionCurrency(gainLoss.total, groupCurrency)
-                            : currencySummary,
-                          complete: gainLoss.complete,
-                          tone: positionValueClass(gainLoss.total),
-                        },
-                      ].map((metric) => (
+                      {positionMetrics.map((metric) => (
                         <div
                           key={metric.label}
                           className="rounded-md border border-white/[0.07] bg-black/10 px-3 py-2"
@@ -1429,78 +1412,81 @@ function AccountEquityPanel({
   ).size;
   const historyComplete = metadata.complete && !metadata.truncated;
 
-  const columns: TableColumn<EquityHistoryRow>[] = [
-    {
-      key: "date",
-      label: "Date",
-      width: "20%",
-      sortValue: (row) => row.timestamp ?? row.date,
-      render: (row) => (
-        <div>
-          <div className="font-medium text-[var(--foreground)]">
-            {formatDate(row.date)}
+  const columns: DashboardColumn<EquityHistoryRow>[] = [
+    valueColumn<EquityHistoryRow>(
+      "date",
+      "Date",
+      (row) => row.timestamp ?? row.date,
+      {
+        width: "20%",
+        sortable: true,
+        render: (_, row) => (
+          <div>
+            <div className="font-medium text-[var(--foreground)]">
+              {formatDate(row.date)}
+            </div>
+            <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+              Updated {equitySnapshotTime(row.timestamp, timezone)}
+            </div>
           </div>
-          <div className="mt-0.5 text-[11px] text-[var(--muted)]">
-            Updated {equitySnapshotTime(row.timestamp, timezone)}
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: "account",
-      label: "Account",
+        ),
+        csvValue: (_, row) => formatDate(row.date),
+      },
+    ),
+    valueColumn<EquityHistoryRow>(
+      "account",
+      "Account",
+      (row) => row.broker_account_id,
+      {
+        width: "20%",
+        render: (_, row) => (
+          <span className="inline-flex rounded-full border border-white/[0.08] bg-white/[0.05] px-2.5 py-1 font-mono text-[10px] uppercase text-[var(--muted-strong)]">
+            {row.broker_account_id === "ALL"
+              ? "Portfolio"
+              : (row.broker_account_id ?? "—")}
+          </span>
+        ),
+      },
+    ),
+    valueColumn<EquityHistoryRow>("equity", "Net Liquid", (row) => row.equity_value, {
       width: "20%",
-      render: (row) => (
-        <span className="inline-flex rounded-full border border-white/[0.08] bg-white/[0.05] px-2.5 py-1 font-mono text-[10px] uppercase text-[var(--muted-strong)]">
-          {row.broker_account_id === "ALL"
-            ? "Portfolio"
-            : (row.broker_account_id ?? "—")}
-        </span>
-      ),
-    },
-    {
-      key: "equity",
-      label: "Net Liquid",
-      width: "20%",
-      render: (row) => (
+      render: (value) => (
         <span className="font-mono font-semibold">
-          {formatCurrency(toNumber(row.equity_value))}
+          {formatCurrency(toNumber(value))}
         </span>
       ),
-    },
-    {
-      key: "dayChange",
-      label: "Daily Change",
+    }),
+    valueColumn<EquityHistoryRow>("dayChange", "Daily Change", (row) => row.dayChange, {
       width: "20%",
       align: "right",
-      render: (row) =>
-        row.dayChange === null ? (
+      render: (value) =>
+        value === null ? (
           <span className="text-[var(--muted)]">—</span>
         ) : (
-          <span className={"font-mono font-medium " + positionValueClass(row.dayChange)}>
-            {formatSignedCurrency(row.dayChange)}
+          <span className={"font-mono font-medium " + positionValueClass(value)}>
+            {formatSignedCurrency(toNumber(value))}
           </span>
         ),
-    },
-    {
-      key: "dayChangePercent",
-      label: "Change %",
+    }),
+    valueColumn<EquityHistoryRow>("dayChangePercent", "Change %", (row) => row.dayChangePercent, {
       width: "20%",
       align: "right",
-      render: (row) =>
-        row.dayChangePercent === null ? (
+      render: (value) =>
+        value === null ? (
           <span className="text-[var(--muted)]">—</span>
         ) : (
-          <span
-            className={
-              "font-mono font-medium " +
-              positionValueClass(row.dayChangePercent)
-            }
-          >
-            {formatSignedPercent(row.dayChangePercent)}
+
+          <span className={"font-mono font-medium " + positionValueClass(value)}>
+            {formatSignedPercent(toNumber(value))}
           </span>
         ),
-    },
+    }),
+  ];
+  const csvFields = [
+    ...columns,
+    csvField<EquityHistoryRow>("Updated", (row) =>
+      formatTimestamp(row.timestamp, timezone),
+    ),
   ];
 
   return (
@@ -1570,34 +1556,12 @@ function AccountEquityPanel({
       </div>
 
       <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={() =>
-            downloadCsv(
-              "equity-history.csv",
-              [
-                "Date",
-                "Account",
-                "Net Liquid",
-                "Daily Change",
-                "Change %",
-                "Updated",
-              ],
-              orderedRows.map((row) => [
-                formatDate(row.date),
-                row.broker_account_id ?? "",
-                row.equity_value ?? "",
-                row.dayChange ?? "",
-                row.dayChangePercent ?? "",
-                formatTimestamp(row.timestamp, timezone),
-              ]),
-            )
-          }
+        <CsvDownloadButton
+          fileName="equity-history.csv"
+          fields={csvFields}
+          rows={orderedRows}
           className={`${secondaryButtonClass} w-full md:w-auto`}
-        >
-          <Download className="h-4 w-4" />
-          Download CSV
-        </button>
+        />
       </div>
 
       <DataTable
@@ -1636,73 +1600,43 @@ function TradeLogsPanel({
     );
   }
 
-  const columns: TableColumn<TradeExecution>[] = [
-    {
-      key: "timestamp",
-      label: "Date",
+  const dashCell = { missing: "-", csvMissing: "-" };
+  const columns: DashboardColumn<TradeExecution>[] = [
+    valueColumn<TradeExecution>("timestamp", "Date", (row) => row.timestamp, {
       width: "205px",
       sticky: "left",
-      sortValue: (row) => row.timestamp,
-      render: (row) => formatTimestamp(row.timestamp, timezone),
-    },
-    {
-      key: "family",
-      label: "Family",
-      width: "250px",
-      sticky: "left",
-      stickyOffset: "205px",
-      stickyEdge: true,
-      sortValue: (row) => strategyFamily(row),
-      render: (row) => strategyFamily(row),
-    },
-    {
-      key: "version",
-      label: "Version",
-      width: "110px",
-      sortValue: (row) => strategyVersionLabel(row),
-      render: (row) => strategyVersionLabel(row),
-    },
-    {
-      key: "strategyIdentity",
-      label: "Strategy ID",
-      width: "280px",
-      sortValue: (row) => row.strategy_name,
-      render: (row) => row.strategy_name ?? "-",
-    },
-    {
-      key: "account",
-      label: "Account ID",
-      render: (row) => row.broker_account_id ?? "-",
-    },
-    { key: "symbol", label: "Symbol", render: (row) => row.symbol ?? "-" },
-    { key: "type", label: "Type", render: (row) => row.sec_type ?? "-" },
-    { key: "side", label: "Side", render: (row) => row.side ?? "-" },
-    {
-      key: "qty",
-      label: "Qty",
+      sortable: true,
+      render: (_, row) => formatTimestamp(row.timestamp, timezone),
+      csvValue: (_, row) => formatTimestamp(row.timestamp, timezone),
+    }),
+    ...strategyColumns<TradeExecution>("205px", "-", "-"),
+    valueColumn<TradeExecution>("account", "Account ID", (row) => row.broker_account_id, dashCell),
+    valueColumn<TradeExecution>("symbol", "Symbol", (row) => row.symbol, dashCell),
+    valueColumn<TradeExecution>("type", "Type", (row) => row.sec_type, dashCell),
+    valueColumn<TradeExecution>("side", "Side", (row) => row.side, dashCell),
+    valueColumn<TradeExecution>("qty", "Qty", (row) => row.quantity, {
       align: "right",
-      render: (row) => formatNumber(row.quantity, 0),
-    },
-    {
-      key: "price",
-      label: "Price",
+      render: (value) => formatNumber(value, 0),
+      csvValue: (value) => toOptionalNumber(value) ?? "",
+    }),
+    valueColumn<TradeExecution>("price", "Price", (row) => row.price, {
       align: "right",
-      render: (row) => formatNumber(row.price),
-    },
-    {
-      key: "commission",
-      label: "Commission",
+      render: (value) => formatNumber(value),
+      csvValue: (value) => toOptionalNumber(value) ?? "",
+    }),
+    valueColumn<TradeExecution>("commission", "Commission", (row) => row.commission, {
       align: "right",
-      render: (row) => commissionTableValue(row.commission),
-    },
-    {
-      key: "pnl",
-      label: "Trade P&L",
+      render: (value) => commissionTableValue(value),
+    }),
+    valueColumn<TradeExecution>("pnl", "Trade P&L", (row) => row.realized_pnl, {
       align: "right",
-      render: (row) => pnlTableValue(row.realized_pnl),
-    },
-    { key: "status", label: "Status", render: (row) => row.status ?? "-" },
-    { key: "notes", label: "Notes", wrap: true, render: (row) => row.notes ?? "" },
+      render: (value) => pnlTableValue(value),
+    }),
+    valueColumn<TradeExecution>("status", "Status", (row) => row.status, dashCell),
+    valueColumn<TradeExecution>("notes", "Notes", (row) => row.notes, {
+      missing: "",
+      wrap: true,
+    }),
   ];
   const sortedRows = sortByNewest(rows);
 
@@ -1712,36 +1646,12 @@ function TradeLogsPanel({
         <div className="font-mono text-[11px] uppercase tracking-normal text-[var(--muted-strong)]">
           {rows.length} records loaded
         </div>
-        <button
-          type="button"
+        <CsvDownloadButton
+          fileName="trade-logs.csv"
+          fields={columns}
+          rows={sortedRows}
           disabled={rows.length === 0}
-          onClick={() =>
-            downloadCsv(
-              "trade-logs.csv",
-              columns.map((column) => column.label),
-              sortedRows.map((row) => [
-                formatTimestamp(row.timestamp, timezone),
-                strategyFamily(row),
-                strategyVersionLabel(row),
-                row.strategy_name ?? "-",
-                row.broker_account_id ?? "-",
-                row.symbol ?? "-",
-                row.sec_type ?? "-",
-                row.side ?? "-",
-                toOptionalNumber(row.quantity) ?? "",
-                toOptionalNumber(row.price) ?? "",
-                row.commission ?? "",
-                row.realized_pnl ?? "",
-                row.status ?? "-",
-                row.notes ?? "",
-              ]),
-            )
-          }
-          className={secondaryButtonClass}
-        >
-          <Download className="h-4 w-4" />
-          Download CSV
-        </button>
+        />
       </div>
 
       {rows.length === 0 ? (
@@ -2248,6 +2158,10 @@ export function DashboardShell() {
           : "current"
         : "pending";
   const syncStatus = syncing ? "running" : syncError ? "failed" : lastSyncAt ? "complete" : "not run";
+  const operationalStatuses = [
+    { label: "Query", status: queryStatus, icon: RadioTower },
+    { label: "Reconciliation", status: syncStatus, icon: ShieldCheck },
+  ] as const;
 
   return (
     <div className="relative min-h-screen text-[var(--foreground)] lg:flex">
@@ -2300,62 +2214,24 @@ export function DashboardShell() {
                   />
                   Backend {health.status}
                 </span>
-                <span
-                  role="status"
-                  className={`${statusPillClass} ${
-                    queryStatus === "current"
-                      ? "text-emerald-200"
-                      : queryStatus === "failed"
-                        ? "text-rose-200"
-                        : queryStatus === "partial"
-                          ? "text-amber-200"
-                          : "text-cyan-200"
-                  }`}
-                >
-                  <SignalIcon
-                    icon={RadioTower}
-                    tone={
-                      queryStatus === "failed"
-                        ? "rose"
-                        : queryStatus === "partial"
-                          ? "amber"
-                          : queryStatus === "current"
-                            ? "green"
-                            : "cyan"
-                    }
-                    className="h-5 w-5"
-                    iconClassName="h-3 w-3"
-                  />
-                  Query {queryStatus}
-                </span>
-                <span
-                  role="status"
-                  className={`${statusPillClass} ${
-                    syncStatus === "failed"
-                      ? "text-rose-200"
-                      : syncStatus === "complete"
-                        ? "text-emerald-200"
-                        : syncStatus === "running"
-                          ? "text-cyan-200"
-                          : "text-[var(--muted-strong)]"
-                  }`}
-                >
-                  <SignalIcon
-                    icon={ShieldCheck}
-                    tone={
-                      syncStatus === "failed"
-                        ? "rose"
-                        : syncStatus === "complete"
-                          ? "green"
-                          : syncStatus === "running"
-                            ? "cyan"
-                            : "amber"
-                    }
-                    className="h-5 w-5"
-                    iconClassName="h-3 w-3"
-                  />
-                  Reconciliation {syncStatus}
-                </span>
+                {operationalStatuses.map(({ label, status, icon }) => {
+                  const visual = operationalStatusVisuals[status];
+                  return (
+                    <span
+                      key={label}
+                      role="status"
+                      className={`${statusPillClass} ${visual.className}`}
+                    >
+                      <SignalIcon
+                        icon={icon}
+                        tone={visual.tone}
+                        className="h-5 w-5"
+                        iconClassName="h-3 w-3"
+                      />
+                      {label} {status}
+                    </span>
+                  );
+                })}
               </div>
               <h1 className="text-3xl font-semibold text-[var(--foreground)] md:text-4xl">
                 Quant Alpha Dashboard

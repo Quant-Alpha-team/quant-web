@@ -180,12 +180,10 @@ function centeredYAxisDomain(values: number[]): [number, number] {
 export function EquityChart({ rows }: { rows: AccountEquity[] }) {
   const titleId = useId();
   const summaryId = useId();
-  const series = aggregateEquityHistory(rows)
-    .map((row) => ({
-      label: formatDate(row.date),
-      equity: toNumber(row.equity_value),
-    }))
-    .sort(chronologicalLabel);
+  const series = aggregateEquityHistory(rows).map((row) => ({
+    label: formatDate(row.date),
+    equity: toNumber(row.equity_value),
+  }));
   const data = downsample(series, 3000);
   const yDomain = centeredYAxisDomain(data.map((item) => item.equity));
   const firstPoint = series[0];

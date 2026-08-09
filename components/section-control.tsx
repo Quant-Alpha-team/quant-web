@@ -12,23 +12,17 @@ import { SignalIcon, type SignalTone } from "@/components/signal-icon";
 import { SECTIONS } from "@/lib/dashboard";
 import type { SectionId } from "@/lib/types";
 
-const icons = {
-  overview: Activity,
-  "strategy-pnl": LineChart,
-  "account-equity": WalletCards,
-  positions: BriefcaseBusiness,
-  "trade-logs": ClipboardList,
-  diagnostics: Settings2,
-} satisfies Record<SectionId, React.ComponentType<{ className?: string }>>;
-
-const iconTones = {
-  overview: "mint",
-  "strategy-pnl": "green",
-  "account-equity": "cyan",
-  positions: "mint",
-  "trade-logs": "amber",
-  diagnostics: "violet",
-} satisfies Record<SectionId, SignalTone>;
+const appearances = {
+  overview: { icon: Activity, tone: "mint" },
+  "strategy-pnl": { icon: LineChart, tone: "green" },
+  "account-equity": { icon: WalletCards, tone: "cyan" },
+  positions: { icon: BriefcaseBusiness, tone: "mint" },
+  "trade-logs": { icon: ClipboardList, tone: "amber" },
+  diagnostics: { icon: Settings2, tone: "violet" },
+} satisfies Record<
+  SectionId,
+  { icon: React.ComponentType<{ className?: string }>; tone: SignalTone }
+>;
 
 export function SectionControl({
   selected,
@@ -41,7 +35,7 @@ export function SectionControl({
     <nav aria-label="Dashboard sections">
       <ul className="grid min-h-11 grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-2 rounded-md bg-white/[0.07] p-1 shadow-[0_12px_30px_rgba(0,5,18,0.22)] backdrop-blur-xl">
         {SECTIONS.map((section) => {
-          const Icon = icons[section.id];
+          const { icon: Icon, tone } = appearances[section.id];
           const active = section.id === selected;
           return (
             <li key={section.id} className="flex min-w-0">
@@ -58,7 +52,7 @@ export function SectionControl({
               >
                 <SignalIcon
                   icon={Icon}
-                  tone={iconTones[section.id]}
+                  tone={tone}
                   className={active ? "shadow-none" : ""}
                 />
                 <span className="min-w-0 text-center leading-tight">

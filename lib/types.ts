@@ -156,16 +156,3 @@ export type DashboardData = {
   positionRows: StrategyPosition[];
   meta: DashboardDataMetadata;
 };
-
-export type KpiCards = {
-  accountNav: number | null;
-  navChange: number | null;
-  navChangePercent: number | null;
-  openPnl: number | null;
-  periodRealizedPnl: number | null;
-  periodRealizedRecords: number;
-  totalTrades: number;
-  openPositions: number;
-  openStrategies: number;
-  pricedPositions: number;
-};
