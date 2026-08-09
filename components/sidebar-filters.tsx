@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   CalendarDays,
   Check,
@@ -71,10 +71,20 @@ function MultiSelect({
   onChange: (values: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [draftValues, setDraftValues] = useState(values);
   const rootRef = useRef<HTMLDivElement>(null);
-  const selectedValues = new Set(values);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const popupId = useId();
+  const sourceKey = JSON.stringify([
+    values,
+    options.map((option) => [option.value, option.label]),
+  ]);
+  const openedSourceKeyRef = useRef(sourceKey);
+  const activeValues = open ? draftValues : values;
+  const selectedValues = new Set(activeValues);
   const isAll =
-    values.includes("ALL") ||
+    activeValues.includes("ALL") ||
     (options.length > 0 && options.every((option) => selectedValues.has(option.value)));
   const selectedLabels = options
     .filter((option) => isAll || selectedValues.has(option.value))
@@ -86,6 +96,11 @@ function MultiSelect({
       : selectedLabels.length === 1
         ? selectedLabels[0]
         : `${selectedLabels.length} SELECTED`;
+  const closeAndRestoreFocus = useCallback(() => {
+    setDraftValues(values);
+    setOpen(false);
+    queueMicrotask(() => triggerRef.current?.focus());
+  }, [values]);
 
   useEffect(() => {
     if (!open) {
@@ -94,13 +109,15 @@ function MultiSelect({
 
     function handlePointerDown(event: PointerEvent) {
       if (!rootRef.current?.contains(event.target as Node)) {
+        setDraftValues(values);
         setOpen(false);
       }
     }
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setOpen(false);
+        event.preventDefault();
+        closeAndRestoreFocus();
       }
     }
 
@@ -110,34 +127,77 @@ function MultiSelect({
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [open]);
+  }, [closeAndRestoreFocus, open, values]);
 
+  useEffect(() => {
+    if (!open || (!disabled && openedSourceKeyRef.current === sourceKey)) {
+      return;
+    }
+
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) {
+        return;
+      }
+      closeAndRestoreFocus();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [closeAndRestoreFocus, disabled, open, sourceKey]);
+
+  useEffect(() => {
+    if (!open || disabled) {
+      return;
+    }
+
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        popupRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [disabled, open]);
 
   function toggleValue(value: string) {
     if (value === "ALL") {
-      onChange(isAll ? [] : ["ALL"]);
+      setDraftValues(isAll ? [] : ["ALL"]);
       return;
     }
 
     const nextValues = isAll
       ? options.map((option) => option.value).filter((item) => item !== value)
       : selectedValues.has(value)
-        ? values.filter((item) => item !== value)
-        : [...values, value];
-    onChange(nextValues.length === options.length ? ["ALL"] : nextValues);
+        ? activeValues.filter((item) => item !== value)
+        : [...activeValues, value];
+    setDraftValues(nextValues.length === options.length ? ["ALL"] : nextValues);
   }
 
   return (
     <div ref={rootRef} className="relative">
       <button
+        ref={triggerRef}
         type="button"
         aria-label={label}
         aria-expanded={open}
-        aria-haspopup="listbox"
+        aria-haspopup="dialog"
+        aria-controls={open ? popupId : undefined}
         disabled={disabled}
         title={isAll ? allLabel : selectedLabels.join(", ")}
         className={`${inputClass} flex cursor-pointer items-center justify-between gap-3 text-left disabled:cursor-not-allowed disabled:opacity-55`}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          if (open) {
+            setDraftValues(values);
+            setOpen(false);
+          } else {
+            setDraftValues(values);
+            openedSourceKeyRef.current = sourceKey;
+            setOpen(true);
+          }
+        }}
       >
         <span className="truncate">{summary}</span>
         <ChevronDown
@@ -148,9 +208,10 @@ function MultiSelect({
 
       {open && !disabled ? (
         <div
-          role="listbox"
-          aria-label={label}
-          aria-multiselectable="true"
+          ref={popupRef}
+          id={popupId}
+          role="dialog"
+          aria-label={`${label} choices`}
           className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-[70] max-h-64 overflow-y-auto rounded-md border border-white/[0.14] bg-[#172437]/[0.98] p-1.5 shadow-[0_18px_45px_rgba(0,5,18,0.5)] backdrop-blur-xl"
         >
           {[{ value: "ALL", label: allLabel }, ...options].map((option) => {
@@ -167,8 +228,7 @@ function MultiSelect({
               >
                 <button
                   type="button"
-                  role="option"
-                  aria-selected={checked}
+                  aria-pressed={checked}
                   className="flex w-full cursor-pointer items-center gap-2 rounded px-2.5 py-2 text-left text-sm text-[var(--foreground)] transition hover:bg-white/[0.1] focus-visible:bg-white/[0.1] focus-visible:outline-none"
                   onClick={() => toggleValue(option.value)}
                 >
@@ -187,6 +247,36 @@ function MultiSelect({
               </div>
             );
           })}
+          <div className="sticky bottom-0 mt-1.5 flex gap-2 border-t border-white/[0.14] bg-[#172437] pt-1.5">
+            <button
+              type="button"
+              className="h-11 flex-1 rounded-md border border-white/[0.12] bg-white/[0.06] px-3 text-sm text-[var(--muted-strong)] transition hover:bg-white/[0.1]"
+              onClick={closeAndRestoreFocus}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="h-11 flex-1 rounded-md bg-cyan-300 px-3 text-sm font-semibold text-[#061322] transition hover:brightness-105"
+              onClick={() => {
+                const availableValues = new Set(
+                  options.map((option) => option.value),
+                );
+                const nextValues = draftValues.includes("ALL")
+                  ? ["ALL"]
+                  : draftValues.filter((value) => availableValues.has(value));
+                onChange(
+                  options.length > 0 && nextValues.length === options.length
+                    ? ["ALL"]
+                    : nextValues,
+                );
+                setOpen(false);
+                queueMicrotask(() => triggerRef.current?.focus());
+              }}
+            >
+              Apply
+            </button>
+          </div>
         </div>
       ) : null}
     </div>
@@ -195,6 +285,7 @@ function MultiSelect({
 
 export function SidebarFilters({
   collapsed,
+  apiStatus,
   filters,
   strategyFamilies,
   strategyVersions,
@@ -213,6 +304,7 @@ export function SidebarFilters({
   onToggleCollapsed,
 }: {
   collapsed: boolean;
+  apiStatus: "checking" | "online" | "offline";
   filters: FilterOptions;
   strategyFamilies: string[];
   strategyVersions: string[];
@@ -236,19 +328,20 @@ export function SidebarFilters({
   const selectedFamilyOptions = filters.strategy_families.filter((item) =>
     strategyFamilies.includes(item.family),
   );
-  const versionsByName = new Map<string, { active: boolean }>();
+  const versionsByName = new Map<string, boolean>();
   for (const family of selectedFamilyOptions) {
     for (const item of family.versions) {
       if (item.version !== null) {
-        versionsByName.set(item.version, {
-          active: (versionsByName.get(item.version)?.active ?? false) || item.is_active,
-        });
+        versionsByName.set(
+          item.version,
+          (versionsByName.get(item.version) ?? false) || item.is_active,
+        );
       }
     }
   }
-  const versionOptions = [...versionsByName.entries()].map(([version, item]) => ({
+  const versionOptions = [...versionsByName.entries()].map(([version, active]) => ({
     value: version,
-    label: `${version}${item.active ? "" : " (inactive)"}`,
+    label: `${version}${active ? "" : " (inactive)"}`,
   }));
   const hasVersions = versionOptions.length > 0;
   const versionDisabled =
@@ -268,7 +361,7 @@ export function SidebarFilters({
             icon={ToggleIcon}
             tone="cyan"
             className="h-8 w-8"
-            iconClassName={`h-4 w-4 transition-transform ${collapsed ? "rotate-180 lg:rotate-0" : ""}`}
+            iconClassName="h-4 w-4 rotate-180 transition-transform lg:rotate-0"
           />
         </button>
       </aside>
@@ -325,8 +418,23 @@ export function SidebarFilters({
             <span className="rounded-md border border-white/[0.08] bg-white/[0.05] px-3 py-2 text-[var(--muted)]">
               API LINK
             </span>
-            <span className="rounded-md border border-[#9cf62f]/20 bg-[rgba(156,246,47,0.12)] px-3 py-2 text-[#b8ff5d]">
-              Online
+            <span
+              role="status"
+              aria-live="polite"
+              className={
+                "rounded-md border px-3 py-2 " +
+                (apiStatus === "online"
+                  ? "border-[#9cf62f]/20 bg-[rgba(156,246,47,0.12)] text-[#b8ff5d]"
+                  : apiStatus === "offline"
+                    ? "border-rose-300/20 bg-rose-400/[0.12] text-rose-200"
+                    : "border-amber-300/20 bg-amber-400/[0.12] text-amber-200")
+              }
+            >
+              {apiStatus === "online"
+                ? "Online"
+                : apiStatus === "offline"
+                  ? "Offline"
+                  : "Checking"}
             </span>
           </div>
         </div>
@@ -348,7 +456,6 @@ export function SidebarFilters({
 
         <Field icon={GitBranch} label="Version" tone="violet">
           <MultiSelect
-            key={versionDisabled ? "disabled" : "enabled"}
             label="Version"
             allLabel={hasVersions || strategyFamilies.includes("ALL") ? "ALL VERSIONS" : "N/A"}
             values={strategyVersions}
@@ -360,6 +467,7 @@ export function SidebarFilters({
 
         <Field icon={WalletCards} label="Broker Account" tone="cyan">
           <select
+            aria-label="Broker account"
             className={inputClass}
             value={accountId}
             onChange={(event) => onAccountChange(event.target.value)}
@@ -375,6 +483,7 @@ export function SidebarFilters({
 
         <Field icon={CalendarDays} label="Time Range" tone="amber">
           <select
+            aria-label="Time range"
             className={inputClass}
             value={datePreset}
             onChange={(event) => onPresetChange(event.target.value as DatePreset)}
@@ -410,6 +519,7 @@ export function SidebarFilters({
 
         <Field icon={Clock3} label="Display Timezone" tone="green">
           <select
+            aria-label="Display timezone"
             className={inputClass}
             value={timezone}
             onChange={(event) => onTimezoneChange(event.target.value)}

@@ -51,7 +51,8 @@ body::before {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -87,10 +88,18 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 button:focus-visible,
+a:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+::selection {
+  background: rgba(45, 212, 191, 0.3);
+  color: var(--foreground);
 }
 
 .status-dot {
@@ -118,4 +127,35 @@ select:focus-visible {
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(217, 231, 239, 0.58);
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --muted: #bdd0da;
+    --muted-strong: #f4fbff;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .status-dot {
+    background: CanvasText;
+    border: 1px solid CanvasText;
+    box-shadow: none;
+  }
 }

@@ -6,14 +6,11 @@ import {
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import {
   AlertTriangle,
-  ArrowUpDown,
   ChevronDown,
-  ChevronUp,
   Download,
   FoldVertical,
   RadioTower,
@@ -29,7 +26,6 @@ import { SignalIcon } from "@/components/signal-icon";
 import { SidebarFilters } from "@/components/sidebar-filters";
 import { StatusMessage } from "@/components/status-message";
 import {
-  CHART_COLORS,
   aggregateEquityHistory,
   computeKpis,
   formatCurrency,
@@ -38,21 +34,23 @@ import {
   formatTimestamp,
   includesForSection,
   pnlSummary,
-  recordCounts,
   resolveDateRange,
   sortByNewest,
   strategyFamily,
   strategyIdentity,
   strategyVersionLabel,
   toNumber,
+  toOptionalNumber,
   todayInTimeZone,
 } from "@/lib/dashboard";
 import type {
   AccountEquity,
   DashboardData,
+  DatasetMetadata,
   DatePreset,
   FilterOptions,
   SectionId,
+  StrategyScope,
   StrategyDailyPnl,
   StrategyPosition,
   TradeExecution,
@@ -67,17 +65,40 @@ type ApiResponse<T> = {
 };
 
 const emptyFilters: FilterOptions = {
-  strategies: [],
   strategy_families: [],
   accounts: [],
 };
-const emptyData: DashboardData = { execRows: [], perfRows: [], pnlRows: [], positionRows: [] };
+
+type HealthPayload = {
+  status: "online" | "offline";
+  checkedAt: string;
+  backend: { reachable: boolean; protectedAccess: boolean };
+};
+
+type HealthState = {
+  status: "checking" | "online" | "offline";
+  checkedAt: string | null;
+  error: string | null;
+};
+
+type ReconciliationResult = {
+  status: "completed";
+  completed_at: string;
+  elapsed_seconds: number;
+};
 
 function selectionLabel(values: string[], allLabel: string) {
   if (values.includes("ALL")) {
     return allLabel;
   }
   return values.length > 0 ? values.join(", ") : "NONE";
+}
+
+function sameSelection(left: string[], right: string[]) {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
 }
 
 const surfaceClass =
@@ -104,12 +125,15 @@ function csvCell(value: unknown) {
     return "";
   }
 
-  const text = String(value).replace(/\r?\n/g, " ");
+  let text = String(value).replace(/[\r\n]+/g, " ");
+  if (typeof value === "string" && /^[\u0000-\u0020]*[=+\-@]/.test(text)) {
+    text = `'${text}`;
+  }
   return /[",]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 function downloadCsv(fileName: string, headers: string[], rows: unknown[][]) {
-  const csv = [headers.map(csvCell).join(","), ...rows.map((row) => row.map(csvCell).join(","))].join("\n");
+  const csv = "\uFEFF" + [headers.map(csvCell).join(","), ...rows.map((row) => row.map(csvCell).join(","))].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const link = document.createElement("a");
   const url = URL.createObjectURL(blob);
@@ -172,6 +196,98 @@ function EmptyPanel({ children }: { children: React.ReactNode }) {
   return <StatusMessage tone="info">{children}</StatusMessage>;
 }
 
+function DatasetUnavailableMessage({
+  label,
+  metadata,
+}: {
+  label: string;
+  metadata: DatasetMetadata;
+}) {
+  return (
+    <StatusMessage tone="error">
+      {label} data is unavailable for this query.
+      {metadata.error ? ` ${metadata.error}` : " Try reloading the data."}
+    </StatusMessage>
+  );
+}
+
+const datasetLabels: Record<keyof DashboardData["meta"]["datasets"], string> = {
+  executions: "Executions",
+  equity: "Account equity",
+  pnl: "Strategy P&L",
+  positions: "Positions",
+};
+
+function scopeIssueSummary(labels: string[]) {
+  const visibleLabels = labels.slice(0, 3);
+  if (visibleLabels.length === 0) {
+    return "";
+  }
+  const remaining = labels.length - visibleLabels.length;
+  return ` (${visibleLabels.join(", ")}${remaining > 0 ? `, +${remaining} more` : ""})`;
+}
+
+function datasetMetadataSummary(metadata: DatasetMetadata) {
+  if (!metadata.requested) {
+    return "Not requested for this view";
+  }
+  const total = metadata.total === null ? "total unknown" : `${metadata.total} total`;
+  const details = [`${metadata.fetched} fetched`, total];
+  if (metadata.truncated) {
+    details.push("truncated");
+  } else if (!metadata.complete) {
+    details.push("partial");
+  } else {
+    details.push("complete");
+  }
+  if (metadata.invalidRows > 0) {
+    details.push(
+      `${metadata.invalidRows} invalid row${metadata.invalidRows === 1 ? "" : "s"} omitted`,
+    );
+  }
+  if (metadata.scopes.incomplete > 0) {
+    details.push(
+      `${metadata.scopes.incomplete}/${metadata.scopes.requested} scopes incomplete${scopeIssueSummary(metadata.scopes.incompleteLabels)}`,
+    );
+  }
+  if (metadata.scopes.failed > 0) {
+    details.push(
+      `${metadata.scopes.failed}/${metadata.scopes.requested} scopes failed${scopeIssueSummary(metadata.scopes.failedLabels)}`,
+    );
+  }
+  return details.join(" · ");
+}
+
+function DataQualityNotice({ data }: { data: DashboardData }) {
+  const issues = Object.entries(data.meta.datasets).filter(
+    ([, metadata]) =>
+      metadata.requested &&
+      (!metadata.complete || metadata.truncated || metadata.invalidRows > 0),
+  ) as Array<[keyof DashboardData["meta"]["datasets"], DatasetMetadata]>;
+
+  if (issues.length === 0) {
+    return null;
+  }
+
+  return (
+    <StatusMessage tone="info">
+      <div>
+        <div className="font-semibold text-amber-100">
+          Partial data — totals, charts, and CSV exports may be incomplete.
+        </div>
+        <ul className="mt-1 list-disc space-y-0.5 pl-5">
+          {issues.map(([name, metadata]) => (
+            <li key={name}>
+              {datasetLabels[name]}: {datasetMetadataSummary(metadata)}
+              {metadata.error ? ` · ${metadata.error}` : ""}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </StatusMessage>
+  );
+}
+
 type MetricTone = "neutral" | "profit" | "loss";
 
 function metricTone(value: number | null): MetricTone {
@@ -189,6 +305,25 @@ function formatSignedPercent(value: number) {
   return `${value > 0 ? "+" : ""}${formatNumber(value, 2)}%`;
 }
 
+function datasetAvailable(metadata: DatasetMetadata) {
+  return metadata.requested && (metadata.complete || metadata.fetched > 0);
+}
+
+function datasetDetail(detail: string, metadata: DatasetMetadata) {
+  const notices: string[] = [];
+  if (metadata.truncated) {
+    notices.push("Result limit reached");
+  } else if (!metadata.complete) {
+    notices.push("Partial dataset");
+  }
+  if (metadata.invalidRows > 0) {
+    notices.push(
+      `${metadata.invalidRows} invalid row${metadata.invalidRows === 1 ? "" : "s"} omitted`,
+    );
+  }
+  return notices.length > 0 ? `${notices.join(" · ")} · ${detail}` : detail;
+}
+
 function OverviewPanel({
   strategyScope,
   accountId,
@@ -204,13 +339,45 @@ function OverviewPanel({
     data.pnlRows,
     data.positionRows,
   );
-  const realizedValue = kpi.periodRealizedPnl;
-  const realizedDetail =
-    realizedValue !== null
-      ? `${kpi.periodRealizedRecords} daily realized record${kpi.periodRealizedRecords === 1 ? "" : "s"}`
-      : "No realized P&L records";
+  const { executions, equity, pnl, positions } = data.meta.datasets;
+  const executionsAvailable = datasetAvailable(executions);
+  const equityAvailable = datasetAvailable(equity);
+  const pnlAvailable = datasetAvailable(pnl);
+  const positionsAvailable = datasetAvailable(positions);
+  const executionsComplete =
+    executionsAvailable && executions.complete && !executions.truncated;
+  const pnlComplete = pnlAvailable && pnl.complete && !pnl.truncated;
+  const positionsComplete =
+    positionsAvailable && positions.complete && !positions.truncated;
+  const currentEquityValue =
+    equity.complete && !equity.truncated ? kpi.accountNav : null;
+  const currentEquityAvailable = currentEquityValue !== null;
+  const realizedValueCount = data.pnlRows.filter(
+    (row) => toOptionalNumber(row.realized_pnl) !== null,
+  ).length;
+  const realizedCoverageComplete =
+    realizedValueCount === data.pnlRows.length;
+  const realizedValue =
+    pnlComplete && realizedCoverageComplete
+      ? data.pnlRows.length === 0
+        ? 0
+        : kpi.periodRealizedPnl
+      : null;
+  const realizedDetail = !pnlAvailable
+    ? "Realized P&L data unavailable"
+    : !pnlComplete
+      ? data.pnlRows.length === 0
+        ? "No records were fetched; the full-range total is unavailable"
+        : `${realizedValueCount}/${data.pnlRows.length} fetched rows include realized P&L; the full-range total is unavailable`
+      : !realizedCoverageComplete
+        ? `${realizedValueCount}/${data.pnlRows.length} rows include realized P&L; the total is unavailable`
+        : data.pnlRows.length === 0
+          ? "No realized P&L records in selected range"
+          : `${kpi.periodRealizedRecords} daily realized record${kpi.periodRealizedRecords === 1 ? "" : "s"}`;
   const navDetail =
-    kpi.navChange === null || kpi.navChangePercent === null
+    data.perfRows.length === 0
+      ? "No NAV closes in selected range"
+      : kpi.navChange === null || kpi.navChangePercent === null
       ? "One NAV close in selected range"
       : `${formatSignedCurrency(kpi.navChange)} (${formatSignedPercent(kpi.navChangePercent)})`;
   const tradedFamilies = new Set(
@@ -218,31 +385,65 @@ function OverviewPanel({
   ).size;
   const tradesDetail =
     kpi.totalTrades === 0
-      ? "No executions in selected range"
-      : `${tradedFamilies} ${tradedFamilies === 1 ? "family" : "families"} in selected range`;
-  const commissionDetail =
-    kpi.totalTrades === 0
-      ? "No commission in selected range"
-      : `${formatCurrency(Math.abs(kpi.totalCommission) / kpi.totalTrades)} average per trade`;
+      ? `No executions in ${executionsComplete ? "selected range" : "fetched records"}`
+      : `${tradedFamilies} ${tradedFamilies === 1 ? "family" : "families"} in ${executionsComplete ? "selected range" : "fetched records"}`;
+  const commissionValues = data.execRows
+    .map((row) => toOptionalNumber(row.commission))
+    .filter((value): value is number => value !== null);
+  const commissionCoverageComplete =
+    commissionValues.length === data.execRows.length;
+  const commissionValue =
+    executionsComplete && commissionCoverageComplete
+      ? commissionValues.reduce((total, value) => total + value, 0)
+      : null;
+  const commissionDetail = !executionsAvailable
+    ? "Commission data unavailable"
+    : !executionsComplete
+      ? data.execRows.length === 0
+        ? "No executions were fetched; the full-range commission is unavailable"
+        : `${commissionValues.length}/${data.execRows.length} fetched executions include commission; the full-range total is unavailable`
+      : !commissionCoverageComplete
+        ? `${commissionValues.length}/${data.execRows.length} executions include commission; the total is unavailable`
+        : data.execRows.length === 0
+          ? "No commission in selected range"
+          : `${formatCurrency(Math.abs(commissionValue ?? 0) / data.execRows.length)} average per trade`;
+  const unrealizedValue = positionsComplete ? kpi.openPnl : null;
 
   return (
     <Panel title={`Portfolio Overview: ${strategyScope} (${accountId})`}>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <div className="lg:col-span-2">
           <MetricCard
-            label="Current Equity"
-            value={kpi.accountNav === null ? "Unavailable" : formatCurrency(kpi.accountNav)}
-            delta={navDetail}
+            label="Account-wide Current Equity"
+            value={
+              currentEquityAvailable
+                ? formatCurrency(currentEquityValue)
+                : "Unavailable"
+            }
+            delta={datasetDetail(
+              `${
+                currentEquityAvailable
+                  ? navDetail
+                  : "Latest NAV close is not guaranteed"
+              } · Not affected by strategy filters`,
+              equity,
+            )}
             tone="neutral"
-            deltaTone={metricTone(kpi.navChange)}
+            deltaTone={
+              currentEquityAvailable ? metricTone(kpi.navChange) : "neutral"
+            }
             iconTone="cyan"
           />
         </div>
         <div className="lg:col-span-2">
           <MetricCard
             label="Total Realized P&L"
-            value={formatCurrency(realizedValue ?? 0)}
-            delta={realizedDetail}
+            value={
+              realizedValue === null
+                ? "Unavailable"
+                : formatCurrency(realizedValue)
+            }
+            delta={datasetDetail(realizedDetail, pnl)}
             tone={metricTone(realizedValue)}
             deltaTone={metricTone(realizedValue)}
           />
@@ -251,45 +452,72 @@ function OverviewPanel({
           <MetricCard
             label="Total Unrealized P&L"
             value={
-              kpi.openPnl === null
+              !positionsAvailable || !positionsComplete
+                ? "Unavailable"
+                : unrealizedValue === null
                 ? "Pricing incomplete"
-                : formatCurrency(kpi.openPnl)
+                : formatCurrency(unrealizedValue)
             }
-            delta={
-              kpi.openPositions === 0
+            delta={datasetDetail(
+              !positionsAvailable
+                ? "Position data unavailable"
+                : !positionsComplete
+                  ? `${kpi.pricedPositions}/${kpi.openPositions} fetched positions valued; the full-range total is unavailable`
+                : kpi.openPositions === 0
                 ? "No open positions"
-                : `${kpi.pricedPositions}/${kpi.openPositions} positions valued`
-            }
-            tone={metricTone(kpi.openPnl)}
+                : `${kpi.pricedPositions}/${kpi.openPositions} positions valued`,
+              positions,
+            )}
+            tone={metricTone(unrealizedValue)}
           />
         </div>
         <div className="lg:col-span-2">
           <MetricCard
             label="Total Trades"
-            value={String(kpi.totalTrades)}
-            delta={tradesDetail}
+            value={
+              !executionsAvailable
+                ? "Unavailable"
+                : `${kpi.totalTrades}${executionsComplete ? "" : "+"}`
+            }
+            delta={datasetDetail(tradesDetail, executions)}
             tone="neutral"
           />
         </div>
         <div className="lg:col-span-2">
           <MetricCard
             label="Open Positions"
-            value={String(kpi.openPositions)}
-            delta={`${kpi.openStrategies} ${kpi.openStrategies === 1 ? "family" : "families"}`}
+            value={
+              !positionsAvailable
+                ? "Unavailable"
+                : `${kpi.openPositions}${positionsComplete ? "" : "+"}`
+            }
+            delta={datasetDetail(
+              `${kpi.openStrategies} ${kpi.openStrategies === 1 ? "family" : "families"} in ${positionsComplete ? "selected range" : "fetched records"}`,
+              positions,
+            )}
             tone="neutral"
           />
         </div>
         <div className="lg:col-span-2">
           <MetricCard
             label="Total Commission"
-            value={formatCurrency(kpi.totalCommission)}
-            delta={commissionDetail}
+            value={
+              commissionValue === null
+                ? "Unavailable"
+                : formatCurrency(commissionValue)
+            }
+            delta={datasetDetail(commissionDetail, executions)}
             tone="neutral"
           />
         </div>
       </div>
 
-      {data.perfRows.length === 0 ? (
+      {!equityAvailable ? (
+        <DatasetUnavailableMessage
+          label="Account equity"
+          metadata={equity}
+        />
+      ) : data.perfRows.length === 0 ? (
         <EmptyPanel>
           No account NAV history is available in the selected range.
         </EmptyPanel>
@@ -363,7 +591,21 @@ function pnlDataBasis(row: StrategyDailyPnl) {
 const strategyPnlHelp =
   "Daily P&L is net of commission and includes the daily open-position mark change when pricing is available. Realized P&L is the day's realized result after commission; opening-only fees do not create realized P&L. Unrealized P&L is shown separately. Empty zero-only archive rows are omitted.";
 
-function StrategyPnlPanel({ rows }: { rows: StrategyDailyPnl[] }) {
+function StrategyPnlPanel({
+  rows,
+  metadata,
+}: {
+  rows: StrategyDailyPnl[];
+  metadata: DatasetMetadata;
+}) {
+  if (!datasetAvailable(metadata)) {
+    return (
+      <Panel title="Strategy P&L Performance" helpText={strategyPnlHelp}>
+        <DatasetUnavailableMessage label="Strategy P&L" metadata={metadata} />
+      </Panel>
+    );
+  }
+
   const summary = pnlSummary(rows);
   const informativeRows = rows.filter(
     (row) =>
@@ -377,7 +619,9 @@ function StrategyPnlPanel({ rows }: { rows: StrategyDailyPnl[] }) {
     return (
       <Panel title="Strategy P&L Performance" helpText={strategyPnlHelp}>
         <EmptyPanel>
-          No non-zero daily strategy performance was recorded in the selected range.
+          {metadata.complete
+            ? "No non-zero daily strategy performance was recorded in the selected range."
+            : "No non-zero strategy performance was found in the fetched records. This incomplete response cannot confirm the full selected range."}
         </EmptyPanel>
       </Panel>
     );
@@ -545,18 +789,6 @@ function StrategyPnlPanel({ rows }: { rows: StrategyDailyPnl[] }) {
   );
 }
 
-
-function optionalPositionNumber(value: unknown) {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
-  }
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
 function positionInstrumentLabel(row: StrategyPosition) {
   if (row.local_symbol) {
     return row.local_symbol;
@@ -599,107 +831,153 @@ function positionAssetGroup(secType: string | undefined) {
 }
 
 function positionValueClass(value: unknown) {
-  const numeric = optionalPositionNumber(value);
+  const numeric = toOptionalNumber(value);
   if (numeric === null || numeric === 0) {
     return "text-[var(--muted-strong)]";
   }
   return numeric > 0 ? "text-[var(--profit)]" : "text-[var(--loss)]";
 }
 
-function formatPositionCurrency(value: unknown) {
-  const numeric = optionalPositionNumber(value);
-  return numeric === null ? "—" : formatCurrency(numeric);
+function formatPositionCurrency(value: unknown, currency?: string) {
+  const numeric = toOptionalNumber(value);
+  if (numeric === null) {
+    return "—";
+  }
+  const currencyCode = currency?.trim().toUpperCase();
+  if (!currencyCode || !/^[A-Z]{3}$/.test(currencyCode)) {
+    return `${formatNumber(numeric)} (currency unknown)`;
+  }
+  try {
+    return formatCurrency(numeric, currencyCode);
+  } catch {
+    return `${formatNumber(numeric)} ${currencyCode}`;
+  }
 }
 
 function formatPositionPercent(value: unknown) {
-  const numeric = optionalPositionNumber(value);
+  const numeric = toOptionalNumber(value);
   return numeric === null ? "—" : formatNumber(numeric, 2) + "%";
 }
 
-type PositionSortKey =
-  | "quantity"
-  | "mark_price"
-  | "market_value"
-  | "cost_basis"
-  | "day_change"
-  | "unrealized_pnl"
-  | "gain_loss_percent"
-  | "expiry_date";
-
-type PositionSortState = {
-  key: PositionSortKey;
-  direction: "asc" | "desc";
-};
-
-type PositionColumnKey =
-  | "symbol"
-  | "description"
-  | "quantity"
-  | "price"
-  | "marketValue"
-  | "costBasis"
-  | "dayChange"
-  | "profitLoss"
-  | "profitLossPercent"
-  | "expiration";
-
-type PositionColumnWidths = Record<PositionColumnKey, number>;
-
-const positionTableColumns: Array<{
-  key: PositionColumnKey;
-  label: string;
-  align: "left" | "right";
-  minWidth: number;
-  sortKey?: PositionSortKey;
-}> = [
-  { key: "symbol", label: "Symbol", align: "left", minWidth: 96 },
-  { key: "description", label: "Description", align: "left", minWidth: 140 },
-  { key: "quantity", label: "Qty", align: "right", minWidth: 72, sortKey: "quantity" },
-  { key: "price", label: "Price", align: "right", minWidth: 88, sortKey: "mark_price" },
-  { key: "marketValue", label: "Mkt Val", align: "right", minWidth: 104, sortKey: "market_value" },
-  { key: "costBasis", label: "Cost Basis", align: "right", minWidth: 104, sortKey: "cost_basis" },
-  { key: "dayChange", label: "P/L Day", align: "right", minWidth: 112, sortKey: "day_change" },
-  { key: "profitLoss", label: "P/L", align: "right", minWidth: 104, sortKey: "unrealized_pnl" },
-  { key: "profitLossPercent", label: "P/L %", align: "right", minWidth: 92, sortKey: "gain_loss_percent" },
-  { key: "expiration", label: "Exp/Mat", align: "left", minWidth: 112, sortKey: "expiry_date" },
-];
-
-function sortPositionRows(rows: StrategyPosition[], sort: PositionSortState | null) {
-  if (!sort) {
-    return rows;
-  }
-
-  return [...rows].sort((left, right) => {
-    const leftValue = left[sort.key];
-    const rightValue = right[sort.key];
-    const leftMissing =
-      leftValue === null || leftValue === undefined || leftValue === "";
-    const rightMissing =
-      rightValue === null || rightValue === undefined || rightValue === "";
-
-    if (leftMissing !== rightMissing) {
-      return leftMissing ? 1 : -1;
-    }
-
-    let comparison = 0;
-    if (!leftMissing && !rightMissing) {
-      if (sort.key === "expiry_date") {
-        comparison = String(leftValue).localeCompare(String(rightValue));
-      } else {
-        comparison =
-          (optionalPositionNumber(leftValue) ?? 0) -
-          (optionalPositionNumber(rightValue) ?? 0);
-      }
-    }
-
-    if (comparison === 0) {
-      comparison = positionInstrumentLabel(left).localeCompare(
-        positionInstrumentLabel(right),
+function positionNumericColumn(
+  key: string,
+  label: string,
+  width: number,
+  valueKey: keyof StrategyPosition,
+  options: {
+    bold?: boolean;
+    tone?: boolean;
+    format?: (value: unknown, row: StrategyPosition) => string;
+  } = {},
+): TableColumn<StrategyPosition> {
+  return {
+    key,
+    label,
+    width: `${width}px`,
+    resizeMinWidth: width,
+    align: "right",
+    sortValue: (row) => toOptionalNumber(row[valueKey]),
+    render: (row) => {
+      const value = row[valueKey];
+      return (
+        <span
+          className={`font-mono${options.bold ? " font-semibold" : ""}${
+            options.tone ? ` ${positionValueClass(value)}` : ""
+          }`}
+        >
+          {options.format
+            ? options.format(value, row)
+            : formatPositionCurrency(value, row.currency)}
+        </span>
       );
-    }
-    return sort.direction === "asc" ? comparison : -comparison;
-  });
+    },
+  };
 }
+
+const positionTableColumns: TableColumn<StrategyPosition>[] = [
+  {
+    key: "symbol",
+    label: "Symbol",
+    width: "96px",
+    resizeMinWidth: 96,
+    sticky: "left",
+    render: (row) => (
+      <div>
+        <div
+          className="truncate font-mono text-sm font-bold text-cyan-300"
+          title={positionInstrumentLabel(row)}
+        >
+          {positionInstrumentLabel(row)}
+        </div>
+        <div className="mt-1 text-[9px] uppercase text-[var(--muted)]">
+          {row.sec_type ?? "—"} · {row.currency ?? "Currency unknown"}
+        </div>
+      </div>
+    ),
+  },
+  {
+    key: "description",
+    label: "Description",
+    width: "140px",
+    resizeMinWidth: 140,
+    sticky: "left",
+    stickyOffset: "96px",
+    stickyEdge: true,
+    render: (row) => (
+      <div>
+        <div
+          className="truncate font-medium text-[var(--foreground)]"
+          title={positionDescription(row)}
+        >
+          {positionDescription(row)}
+        </div>
+        <div
+          className="mt-1 truncate text-[10px] text-[var(--muted)]"
+          title={row.strategy_name}
+        >
+          {strategyVersionLabel(row)} · {row.strategy_name ?? "Unknown"} ·{" "}
+          {row.broker_account_id ?? "—"}
+        </div>
+      </div>
+    ),
+  },
+  positionNumericColumn("quantity", "Qty", 72, "quantity", {
+    format: (value) => formatNumber(value, 4),
+  }),
+  positionNumericColumn("price", "Price", 88, "mark_price"),
+  positionNumericColumn("marketValue", "Mkt Val", 104, "market_value", {
+    bold: true,
+  }),
+  positionNumericColumn("costBasis", "Cost Basis", 104, "cost_basis"),
+  positionNumericColumn("dayChange", "P/L Day", 112, "day_change", {
+    tone: true,
+  }),
+  positionNumericColumn("profitLoss", "P/L", 104, "unrealized_pnl", {
+    bold: true,
+    tone: true,
+  }),
+  positionNumericColumn(
+    "profitLossPercent",
+    "P/L %",
+    92,
+    "gain_loss_percent",
+    {
+      bold: true,
+      tone: true,
+      format: formatPositionPercent,
+    },
+  ),
+  {
+    key: "expiration",
+    label: "Exp/Mat",
+    width: "112px",
+    resizeMinWidth: 112,
+    sortValue: (row) => row.expiry_date,
+    render: (row) => (
+      <span className="text-[var(--muted-strong)]">{row.expiry_date ?? "—"}</span>
+    ),
+  },
+];
 
 function sumPositionValues(
   rows: StrategyPosition[],
@@ -708,7 +986,7 @@ function sumPositionValues(
   let total = 0;
   let complete = true;
   for (const row of rows) {
-    const value = optionalPositionNumber(readValue(row));
+    const value = toOptionalNumber(readValue(row));
     if (value === null) {
       complete = false;
     } else {
@@ -721,9 +999,11 @@ function sumPositionValues(
 function StrategyPositionsPanel({
   rows,
   timezone,
+  metadata,
 }: {
   rows: StrategyPosition[];
   timezone: string;
+  metadata: DatasetMetadata;
 }) {
   const orderedRows = [...rows].sort((left, right) => {
     const familyOrder = strategyFamily(left).localeCompare(strategyFamily(right));
@@ -739,8 +1019,8 @@ function StrategyPositionsPanel({
     if (leftGroup !== rightGroup) {
       return leftGroup.localeCompare(rightGroup);
     }
-    return Math.abs(optionalPositionNumber(right.market_value) ?? 0)
-      - Math.abs(optionalPositionNumber(left.market_value) ?? 0);
+    return Math.abs(toOptionalNumber(right.market_value) ?? 0)
+      - Math.abs(toOptionalNumber(left.market_value) ?? 0);
   });
 
   const strategyMap = new Map<string, StrategyPosition[]>();
@@ -753,261 +1033,9 @@ function StrategyPositionsPanel({
   const [collapsedStrategies, setCollapsedStrategies] = useState<Set<string>>(
     () => new Set(),
   );
-  const [positionSortByStrategy, setPositionSortByStrategy] = useState<
-    Record<string, PositionSortState | null>
-  >({});
-  const [positionColumnWidthsByStrategy, setPositionColumnWidthsByStrategy] =
-    useState<Record<string, PositionColumnWidths>>({});
-  const [positionMinimumTableWidthByStrategy, setPositionMinimumTableWidthByStrategy] =
-    useState<Record<string, number>>({});
-  const [resizingPositionColumn, setResizingPositionColumn] = useState<{
-    strategyName: string;
-    key: PositionColumnKey;
-  } | null>(null);
-  const positionColumnResize = useRef<{
-    strategyName: string;
-    key: PositionColumnKey;
-    pointerId: number;
-    startX: number;
-    startWidth: number;
-    minimumTableWidth: number;
-    widths: PositionColumnWidths;
-  } | null>(null);
   const allStrategiesCollapsed =
     strategyGroups.length > 0 &&
     strategyGroups.every(([strategyName]) => collapsedStrategies.has(strategyName));
-  function measurePositionColumnWidths(
-    resizeHandle: HTMLButtonElement,
-  ): PositionColumnWidths | null {
-    const table = resizeHandle.closest("table");
-    if (!table) {
-      return null;
-    }
-
-    const measured = {} as PositionColumnWidths;
-    for (const column of positionTableColumns) {
-      const cell = table.querySelector<HTMLElement>(
-        `th[data-position-column="${column.key}"]`,
-      );
-      if (!cell) {
-        return null;
-      }
-      measured[column.key] = Math.max(
-        column.minWidth,
-        Math.round(cell.getBoundingClientRect().width),
-      );
-    }
-    return measured;
-  }
-
-  function totalPositionColumnWidth(widths: PositionColumnWidths) {
-    return positionTableColumns.reduce(
-      (total, column) => total + widths[column.key],
-      0,
-    );
-  }
-
-  function fillMinimumPositionTableWidth(
-    widths: PositionColumnWidths,
-    requiredWidth: number,
-  ) {
-    const deficit = requiredWidth - totalPositionColumnWidth(widths);
-    const fillColumn = positionTableColumns.at(-1);
-    if (deficit <= 0 || !fillColumn) {
-      return widths;
-    }
-    return {
-      ...widths,
-      [fillColumn.key]: widths[fillColumn.key] + deficit,
-    };
-  }
-
-  function constrainedPositionColumnWidths(
-    widths: PositionColumnWidths,
-    key: PositionColumnKey,
-    requestedWidth: number,
-    requiredWidth: number,
-  ) {
-    const columnIndex = positionTableColumns.findIndex(
-      (column) => column.key === key,
-    );
-    const column = positionTableColumns[columnIndex];
-    if (!column) {
-      return widths;
-    }
-
-    const startWidth = widths[key];
-    const nextWidth = Math.max(column.minWidth, Math.round(requestedWidth));
-    const delta = nextWidth - startWidth;
-    const nextWidths = { ...widths, [key]: nextWidth };
-    const neighbor = positionTableColumns[columnIndex + 1];
-
-    if (delta > 0 && neighbor) {
-      const neighborCapacity = Math.max(
-        0,
-        widths[neighbor.key] - neighbor.minWidth,
-      );
-      nextWidths[neighbor.key] =
-        widths[neighbor.key] - Math.min(delta, neighborCapacity);
-    } else if (delta < 0) {
-      const tableShrinkCapacity = Math.max(
-        0,
-        totalPositionColumnWidth(widths) - requiredWidth,
-      );
-      const widthForNeighbor = Math.max(
-        0,
-        -delta - tableShrinkCapacity,
-      );
-      if (widthForNeighbor > 0) {
-        if (neighbor) {
-          nextWidths[neighbor.key] = widths[neighbor.key] + widthForNeighbor;
-        } else {
-          nextWidths[key] += widthForNeighbor;
-        }
-      }
-    }
-
-    return nextWidths;
-  }
-
-  function positionResizeMinimumWidth(
-    resizeHandle: HTMLButtonElement,
-    strategyName: string,
-    widths: PositionColumnWidths,
-  ) {
-    const viewportWidth =
-      resizeHandle.closest("table")?.parentElement?.clientWidth ?? 0;
-    return Math.max(
-      positionMinimumTableWidthByStrategy[strategyName] ??
-        totalPositionColumnWidth(widths),
-      viewportWidth,
-    );
-  }
-
-  function startPositionColumnResize(
-    event: ReactPointerEvent<HTMLButtonElement>,
-    strategyName: string,
-    key: PositionColumnKey,
-  ) {
-    if (event.button !== 0) {
-      return;
-    }
-
-    const measuredWidths =
-      positionColumnWidthsByStrategy[strategyName] ??
-      measurePositionColumnWidths(event.currentTarget);
-    if (!measuredWidths) {
-      return;
-    }
-    const requiredWidth = positionResizeMinimumWidth(
-      event.currentTarget,
-      strategyName,
-      measuredWidths,
-    );
-    const widths = fillMinimumPositionTableWidth(
-      measuredWidths,
-      requiredWidth,
-    );
-
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    positionColumnResize.current = {
-      strategyName,
-      key,
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startWidth: widths[key],
-      minimumTableWidth: requiredWidth,
-      widths,
-    };
-    setPositionMinimumTableWidthByStrategy((current) => ({
-      ...current,
-      [strategyName]: requiredWidth,
-    }));
-    setPositionColumnWidthsByStrategy((current) => ({
-      ...current,
-      [strategyName]: widths,
-    }));
-    setResizingPositionColumn({ strategyName, key });
-  }
-
-  function movePositionColumnResize(
-    event: ReactPointerEvent<HTMLButtonElement>,
-  ) {
-    const resize = positionColumnResize.current;
-    if (!resize || resize.pointerId !== event.pointerId) {
-      return;
-    }
-
-    event.preventDefault();
-    setPositionColumnWidthsByStrategy((current) => ({
-      ...current,
-      [resize.strategyName]: constrainedPositionColumnWidths(
-        resize.widths,
-        resize.key,
-        resize.startWidth + event.clientX - resize.startX,
-        resize.minimumTableWidth,
-      ),
-    }));
-  }
-
-  function finishPositionColumnResize(
-    event: ReactPointerEvent<HTMLButtonElement>,
-  ) {
-    if (positionColumnResize.current?.pointerId !== event.pointerId) {
-      return;
-    }
-    positionColumnResize.current = null;
-    setResizingPositionColumn(null);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }
-
-  function resizePositionColumnWithKeyboard(
-    event: ReactKeyboardEvent<HTMLButtonElement>,
-    strategyName: string,
-    key: PositionColumnKey,
-  ) {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
-      return;
-    }
-
-    const measuredWidths =
-      positionColumnWidthsByStrategy[strategyName] ??
-      measurePositionColumnWidths(event.currentTarget);
-    if (!measuredWidths) {
-      return;
-    }
-    const requiredWidth = positionResizeMinimumWidth(
-      event.currentTarget,
-      strategyName,
-      measuredWidths,
-    );
-    const widths = fillMinimumPositionTableWidth(
-      measuredWidths,
-      requiredWidth,
-    );
-
-    event.preventDefault();
-    event.stopPropagation();
-    const delta =
-      (event.shiftKey ? 40 : 12) * (event.key === "ArrowRight" ? 1 : -1);
-    setPositionMinimumTableWidthByStrategy((current) => ({
-      ...current,
-      [strategyName]: requiredWidth,
-    }));
-    setPositionColumnWidthsByStrategy((current) => ({
-      ...current,
-      [strategyName]: constrainedPositionColumnWidths(
-        widths,
-        key,
-        widths[key] + delta,
-        requiredWidth,
-      ),
-    }));
-  }
 
   function toggleStrategy(strategyName: string) {
     setCollapsedStrategies((current) => {
@@ -1021,22 +1049,6 @@ function StrategyPositionsPanel({
     });
   }
 
-  function togglePositionSort(strategyName: string, key: PositionSortKey) {
-    setPositionSortByStrategy((current) => {
-      const currentSort = current[strategyName];
-      const nextSort: PositionSortState | null =
-        currentSort?.key !== key
-          ? { key, direction: "asc" }
-          : currentSort.direction === "asc"
-            ? { key, direction: "desc" }
-            : null;
-      return {
-        ...current,
-        [strategyName]: nextSort,
-      };
-    });
-  }
-
   const csvHeaders = [
     "Family",
     "Version",
@@ -1045,6 +1057,7 @@ function StrategyPositionsPanel({
     "Symbol",
     "Description",
     "Type",
+    "Currency",
     "Quantity",
     "Price",
     "Market Value",
@@ -1063,7 +1076,9 @@ function StrategyPositionsPanel({
       helpText="Current contracts and aggregate quantities are verified against IBKR. Holdings are grouped by family, while each row keeps its version and original strategy ID so positions from different variants are never netted together."
     >
 
-      {rows.length === 0 ? (
+      {!datasetAvailable(metadata) ? (
+        <DatasetUnavailableMessage label="Positions" metadata={metadata} />
+      ) : rows.length === 0 ? (
         <EmptyPanel>No current broker positions exist for this family/account.</EmptyPanel>
       ) : (
         <div className="space-y-4">
@@ -1109,13 +1124,14 @@ function StrategyPositionsPanel({
                       positionInstrumentLabel(row),
                       positionDescription(row),
                       row.sec_type ?? "-",
-                      optionalPositionNumber(row.quantity),
-                      optionalPositionNumber(row.mark_price),
-                      optionalPositionNumber(row.market_value),
-                      optionalPositionNumber(row.cost_basis),
-                      optionalPositionNumber(row.day_change),
-                      optionalPositionNumber(row.unrealized_pnl),
-                      optionalPositionNumber(row.gain_loss_percent),
+                      row.currency ?? "",
+                      toOptionalNumber(row.quantity),
+                      toOptionalNumber(row.mark_price),
+                      toOptionalNumber(row.market_value),
+                      toOptionalNumber(row.cost_basis),
+                      toOptionalNumber(row.day_change),
+                      toOptionalNumber(row.unrealized_pnl),
+                      toOptionalNumber(row.gain_loss_percent),
                       row.expiry_date ?? "",
                       formatTimestamp(row.snapshot_at, timezone),
                       row.source ?? "LEDGER",
@@ -1131,6 +1147,17 @@ function StrategyPositionsPanel({
           </div>
 
           {strategyGroups.map(([strategyName, strategyRows]) => {
+            const currencies = [
+              ...new Set(
+                strategyRows.map((row) => row.currency?.trim().toUpperCase() || "UNKNOWN"),
+              ),
+            ];
+            const groupCurrency =
+              currencies.length === 1 && currencies[0] !== "UNKNOWN"
+                ? currencies[0]
+                : undefined;
+            const currencySummary =
+              currencies.length > 1 ? "Mixed currencies" : "Currency unknown";
             const marketValue = sumPositionValues(strategyRows, (row) => row.market_value);
             const dayChange = sumPositionValues(strategyRows, (row) => row.day_change);
             const costBasis = sumPositionValues(strategyRows, (row) => row.cost_basis);
@@ -1148,15 +1175,6 @@ function StrategyPositionsPanel({
               (row) => row.source === "BROKER_RECONCILED",
             ).length;
             const isCollapsed = collapsedStrategies.has(strategyName);
-            const positionSort = positionSortByStrategy[strategyName] ?? null;
-            const positionColumnWidths =
-              positionColumnWidthsByStrategy[strategyName] ?? null;
-            const positionTableWidth = positionColumnWidths
-              ? positionTableColumns.reduce(
-                  (total, column) => total + positionColumnWidths[column.key],
-                  0,
-                )
-              : null;
             const assetMap = new Map<string, { label: string; rows: StrategyPosition[] }>();
             for (const row of strategyRows) {
               const asset = positionAssetGroup(row.sec_type);
@@ -1223,25 +1241,33 @@ function StrategyPositionsPanel({
                       {[
                         {
                           label: "Market value",
-                          value: formatCurrency(marketValue.total),
+                          value: groupCurrency
+                            ? formatPositionCurrency(marketValue.total, groupCurrency)
+                            : currencySummary,
                           complete: marketValue.complete,
                           tone: "",
                         },
                         {
                           label: "Day change",
-                          value: formatCurrency(dayChange.total),
+                          value: groupCurrency
+                            ? formatPositionCurrency(dayChange.total, groupCurrency)
+                            : currencySummary,
                           complete: dayChange.complete,
                           tone: positionValueClass(dayChange.total),
                         },
                         {
                           label: "Cost basis",
-                          value: formatCurrency(costBasis.total),
+                          value: groupCurrency
+                            ? formatPositionCurrency(costBasis.total, groupCurrency)
+                            : currencySummary,
                           complete: costBasis.complete,
                           tone: "",
                         },
                         {
                           label: "Unrealized P/L",
-                          value: formatCurrency(gainLoss.total),
+                          value: groupCurrency
+                            ? formatPositionCurrency(gainLoss.total, groupCurrency)
+                            : currencySummary,
                           complete: gainLoss.complete,
                           tone: positionValueClass(gainLoss.total),
                         },
@@ -1259,6 +1285,11 @@ function StrategyPositionsPanel({
                           {!metric.complete ? (
                             <div className="mt-0.5 text-[9px] uppercase text-amber-200">
                               Partial pricing
+                            </div>
+                          ) : null}
+                          {!groupCurrency ? (
+                            <div className="mt-0.5 text-[9px] uppercase text-amber-200">
+                              Totals are not combined
                             </div>
                           ) : null}
                         </div>
@@ -1281,236 +1312,18 @@ function StrategyPositionsPanel({
                           {assetGroup.rows.length} holdings
                         </span>
                       </div>
-                      <div className="max-h-[620px] overflow-auto">
-                        <table
-                          className={
-                            "table-fixed border-collapse text-[12px] " +
-                            (positionColumnWidths ? "" : "w-full min-w-[1160px]")
-                          }
-                          style={
-                            positionTableWidth === null
-                              ? undefined
-                              : {
-                                  width: `${positionTableWidth}px`,
-                                  minWidth: `${positionTableWidth}px`,
-                                }
-                          }
-                        >
-                          <colgroup>
-                            {positionTableColumns.map((column) => (
-                              <col
-                                key={column.key}
-                                style={
-                                  positionColumnWidths
-                                    ? { width: `${positionColumnWidths[column.key]}px` }
-                                    : undefined
-                                }
-                              />
-                            ))}
-                          </colgroup>
-                          <thead className="sticky top-0 z-20 bg-[#173451] text-[10px] uppercase tracking-wide text-[#b7ccd8]">
-                            <tr>
-                              {positionTableColumns.map(
-                                ({ key: columnKey, label, align, sortKey }, columnIndex) => (
-                                  <th
-                                    key={columnKey}
-                                    data-position-column={columnKey}
-                                    aria-sort={
-                                      sortKey
-                                        ? positionSort?.key === sortKey
-                                          ? positionSort.direction === "asc"
-                                            ? "ascending"
-                                            : "descending"
-                                          : "none"
-                                        : undefined
-                                    }
-                                    className={
-                                      "overflow-hidden whitespace-nowrap border-b border-white/[0.12] px-3 py-3 font-semibold " +
-                                      (align === "right" ? "text-right" : "text-left") +
-                                      (label === "Symbol"
-                                        ? " sticky left-0 z-40 bg-[#173451]" +
-                                          (positionColumnWidths ? "" : " w-[8%]")
-                                        : label === "Description"
-                                          ? " sticky z-40 bg-[#173451] shadow-[8px_0_16px_rgba(0,7,20,0.24)]" +
-                                            (positionColumnWidths ? "" : " w-[12%]")
-                                          : " relative z-0")
-                                    }
-                                    style={
-                                      label === "Description"
-                                        ? {
-                                            left: positionColumnWidths
-                                              ? `${positionColumnWidths.symbol}px`
-                                              : "8%",
-                                          }
-                                        : undefined
-                                    }
-                                  >
-                                    {sortKey ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => togglePositionSort(strategyName, sortKey)}
-                                        className={
-                                          "inline-flex w-full min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden rounded-sm pr-2 transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 " +
-                                          (align === "right"
-                                            ? "justify-end"
-                                            : "justify-start")
-                                        }
-                                        title={
-                                          positionSort?.key === sortKey
-                                            ? positionSort.direction === "asc"
-                                              ? `Sort ${label} descending`
-                                              : `Clear ${label} sorting`
-                                            : `Sort ${label} ascending`
-                                        }
-                                      >
-                                        <span className="min-w-0 truncate">{label}</span>
-                                        {positionSort?.key === sortKey ? (
-                                          positionSort.direction === "asc" ? (
-                                            <ChevronUp
-                                              className="h-3.5 w-3.5 shrink-0 text-cyan-300"
-                                              aria-hidden="true"
-                                            />
-                                          ) : (
-                                            <ChevronDown
-                                              className="h-3.5 w-3.5 shrink-0 text-cyan-300"
-                                              aria-hidden="true"
-                                            />
-                                          )
-                                        ) : (
-                                          <ArrowUpDown
-                                            className="h-3.5 w-3.5 shrink-0 opacity-50"
-                                            aria-hidden="true"
-                                          />
-                                        )}
-                                      </button>
-                                    ) : (
-                                      <span className="block truncate pr-2">{label}</span>
-                                    )}
-                                    {columnIndex < positionTableColumns.length - 1 ? (
-                                      <button
-                                        type="button"
-                                        aria-label={`Resize ${label} column. Drag, or use the left and right arrow keys.`}
-                                      title={`Resize ${label} column`}
-                                      onPointerDown={(event) =>
-                                        startPositionColumnResize(
-                                          event,
-                                          strategyName,
-                                          columnKey,
-                                        )
-                                      }
-                                      onPointerMove={movePositionColumnResize}
-                                      onPointerUp={finishPositionColumnResize}
-                                      onPointerCancel={finishPositionColumnResize}
-                                      onLostPointerCapture={(event) => {
-                                        if (
-                                          positionColumnResize.current?.pointerId ===
-                                          event.pointerId
-                                        ) {
-                                          positionColumnResize.current = null;
-                                          setResizingPositionColumn(null);
-                                        }
-                                      }}
-                                      onKeyDown={(event) =>
-                                        resizePositionColumnWithKeyboard(
-                                          event,
-                                          strategyName,
-                                          columnKey,
-                                        )
-                                      }
-                                      className="group/resize absolute right-0 top-0 z-10 flex h-full w-2 cursor-col-resize touch-none select-none items-center justify-end focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-300"
-                                    >
-                                      <span
-                                        className={
-                                          "h-3/5 w-px transition-colors " +
-                                          (resizingPositionColumn?.strategyName ===
-                                            strategyName &&
-                                          resizingPositionColumn.key === columnKey
-                                            ? "bg-cyan-300"
-                                            : "bg-white/20 group-hover/resize:bg-cyan-300/80")
-                                        }
-                                      />
-                                      </button>
-                                    ) : null}
-                                  </th>
-                                ),
-                              )}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {sortPositionRows(assetGroup.rows, positionSort).map(
-                              (row, rowIndex) => (
-                              <tr
-                                key={(row.broker_account_id ?? "") + "-" + positionInstrumentLabel(row) + "-" + rowIndex}
-                                className="group border-b border-white/[0.065] bg-white/[0.015] transition hover:bg-cyan-300/[0.055] [&>td]:overflow-hidden"
-                              >
-                                <td
-                                  className={
-                                    "sticky left-0 z-10 whitespace-nowrap bg-[#0d2c47] px-3 py-3 align-top transition group-hover:bg-[#123a59]" +
-                                    (positionColumnWidths ? "" : " w-[8%]")
-                                  }
-                                >
-                                  <div
-                                    className="truncate font-mono text-sm font-bold text-cyan-300"
-                                    title={positionInstrumentLabel(row)}
-                                  >
-                                    {positionInstrumentLabel(row)}
-                                  </div>
-                                  <div className="mt-1 text-[9px] uppercase text-[var(--muted)]">
-                                    {row.sec_type ?? "—"} · {row.currency ?? "USD"}
-                                  </div>
-                                </td>
-                                <td
-                                  className={
-                                    "sticky z-10 bg-[#0d2c47] px-3 py-3 align-top shadow-[8px_0_16px_rgba(0,7,20,0.24)] transition group-hover:bg-[#123a59]" +
-                                    (positionColumnWidths ? "" : " w-[12%]")
-                                  }
-                                  style={{
-                                    left: positionColumnWidths
-                                      ? `${positionColumnWidths.symbol}px`
-                                      : "8%",
-                                  }}
-                                >
-                                  <div
-                                    className="truncate font-medium text-[var(--foreground)]"
-                                    title={positionDescription(row)}
-                                  >
-                                    {positionDescription(row)}
-                                  </div>
-                                  <div className="mt-1 text-[10px] text-[var(--muted)]">
-                                    <span title={row.strategy_name}>
-                                      {strategyVersionLabel(row)} · {row.strategy_name ?? "Unknown"} · {row.broker_account_id ?? "—"}
-                                    </span>
-                                  </div>
-                                </td>
-                                <td className="whitespace-nowrap px-3 py-3 text-right font-mono">
-                                  {formatNumber(row.quantity, 4)}
-                                </td>
-                                <td className="whitespace-nowrap px-3 py-3 text-right font-mono">
-                                  {formatPositionCurrency(row.mark_price)}
-                                </td>
-                                <td className="whitespace-nowrap px-3 py-3 text-right font-mono font-semibold">
-                                  {formatPositionCurrency(row.market_value)}
-                                </td>
-                                <td className="whitespace-nowrap px-3 py-3 text-right font-mono">
-                                  {formatPositionCurrency(row.cost_basis)}
-                                </td>
-                                <td className={"whitespace-nowrap px-3 py-3 text-right font-mono " + positionValueClass(row.day_change)}>
-                                  {formatPositionCurrency(row.day_change)}
-                                </td>
-                                <td className={"whitespace-nowrap px-3 py-3 text-right font-mono font-semibold " + positionValueClass(row.unrealized_pnl)}>
-                                  {formatPositionCurrency(row.unrealized_pnl)}
-                                </td>
-                                <td className={"whitespace-nowrap px-3 py-3 text-right font-mono font-semibold " + positionValueClass(row.gain_loss_percent)}>
-                                  {formatPositionPercent(row.gain_loss_percent)}
-                                </td>
-                                <td className="whitespace-nowrap px-3 py-3 text-[var(--muted-strong)]">
-                                  {row.expiry_date ?? "—"}
-                                </td>
-                              </tr>
-                              ),
-                            )}
-                          </tbody>
-                        </table>
+                      <div
+                        role="region"
+                        tabIndex={0}
+                        aria-label={`${strategyName} ${assetGroup.label} positions table. Scroll horizontally and vertically to view more holdings.`}
+                        className="max-h-[620px] overflow-auto overscroll-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-300/60"
+                      >
+                        <DataTable
+                          key={`${strategyName}-${assetKey}-${assetGroup.rows.length}`}
+                          rows={assetGroup.rows}
+                          columns={positionTableColumns}
+                          minWidth="1160px"
+                        />
                       </div>
                     </div>
                   ))}
@@ -1536,17 +1349,55 @@ function equitySnapshotTime(value: string | undefined, timezone: string) {
   return formatted.split(" ").at(-1) ?? formatted;
 }
 
+function EquitySummaryCard({
+  label,
+  value,
+  detail,
+  valueClassName = "text-[var(--foreground)]",
+  detailClassName = "text-[var(--muted)]",
+}: {
+  label: string;
+  value: ReactNode;
+  detail: ReactNode;
+  valueClassName?: string;
+  detailClassName?: string;
+}) {
+  return (
+    <div className="rounded-md bg-[linear-gradient(180deg,rgba(255,255,255,0.095),rgba(255,255,255,0.055))] px-4 py-3 shadow-[0_14px_32px_var(--shadow)]">
+      <div className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
+        {label}
+      </div>
+      <div className={`mt-1 font-mono text-2xl font-semibold ${valueClassName}`}>
+        {value}
+      </div>
+      <div className={`mt-1 text-xs ${detailClassName}`}>{detail}</div>
+    </div>
+  );
+}
+
 function AccountEquityPanel({
   rows,
   timezone,
+  metadata,
 }: {
   rows: AccountEquity[];
   timezone: string;
+  metadata: DatasetMetadata;
 }) {
   const chronologicalRows = aggregateEquityHistory(rows);
+  if (
+    !datasetAvailable(metadata) ||
+    (chronologicalRows.length === 0 && !metadata.complete)
+  ) {
+    return (
+      <Panel title="Account-wide Equity History">
+        <DatasetUnavailableMessage label="Account equity" metadata={metadata} />
+      </Panel>
+    );
+  }
   if (chronologicalRows.length === 0) {
     return (
-      <Panel title="Equity History">
+      <Panel title="Account-wide Equity History">
         <EmptyPanel>No equity history found in the selected time range.</EmptyPanel>
       </Panel>
     );
@@ -1576,6 +1427,7 @@ function AccountEquityPanel({
   const accountCount = new Set(
     rows.map((row) => row.broker_account_id).filter(Boolean),
   ).size;
+  const historyComplete = metadata.complete && !metadata.truncated;
 
   const columns: TableColumn<EquityHistoryRow>[] = [
     {
@@ -1652,51 +1504,69 @@ function AccountEquityPanel({
   ];
 
   return (
-    <Panel title="Equity History">
+    <Panel
+      title="Account-wide Equity History"
+      helpText="Account NAV is broker-account data and is not narrowed by the strategy family or version filters."
+    >
       <div className="grid gap-3 md:grid-cols-3">
-        <div className="rounded-md bg-[linear-gradient(180deg,rgba(255,255,255,0.095),rgba(255,255,255,0.055))] px-4 py-3 shadow-[0_14px_32px_var(--shadow)]">
-          <div className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
-            Latest Net Liquid
-          </div>
-          <div className="mt-1 font-mono text-2xl font-semibold text-[var(--foreground)]">
-            {formatCurrency(latestEquity)}
-          </div>
-          <div className="mt-1 text-xs text-[var(--muted)]">
-            {accountCount} {accountCount === 1 ? "account" : "accounts"} · Updated{" "}
-            {equitySnapshotTime(latest?.timestamp, timezone)}
-          </div>
-        </div>
+        <EquitySummaryCard
+          label="Latest Net Liquid"
+          value={historyComplete ? formatCurrency(latestEquity) : "Unavailable"}
+          detail={
+            historyComplete ? (
+              <>
+                {accountCount} {accountCount === 1 ? "account" : "accounts"} · Updated{" "}
+                {equitySnapshotTime(latest?.timestamp, timezone)}
+              </>
+            ) : (
+              "Latest close is not guaranteed because the history is incomplete"
+            )
+          }
+        />
+        <EquitySummaryCard
+          label="Change in Range"
+          value={
+            !historyComplete
+              ? "Unavailable"
+              : periodChange === null
+                ? "—"
+                : formatSignedCurrency(periodChange)
+          }
+          valueClassName={positionValueClass(
+            historyComplete ? periodChange : null,
+          )}
+          detail={
+            !historyComplete
+              ? "Selected range is incomplete"
+              : periodChangePercent === null
+                ? "No earlier daily close"
+                : formatSignedPercent(periodChangePercent)
+          }
+          detailClassName={positionValueClass(
+            historyComplete ? periodChangePercent : null,
+          )}
+        />
+        <EquitySummaryCard
+          label="Daily Closes"
+          value={
+            <>
+              {dailyRows.length}
+              {historyComplete ? "" : "+"}
+            </>
+          }
+          detail={
+            historyComplete
+              ? "Trading dates in selected range"
+              : "Fetched trading dates; range is incomplete"
+          }
+        />
+      </div>
 
-        <div className="rounded-md bg-[linear-gradient(180deg,rgba(255,255,255,0.095),rgba(255,255,255,0.055))] px-4 py-3 shadow-[0_14px_32px_var(--shadow)]">
-          <div className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
-            Change in Range
-          </div>
-          <div
-            className={
-              "mt-1 font-mono text-2xl font-semibold " +
-              positionValueClass(periodChange)
-            }
-          >
-            {periodChange === null ? "—" : formatSignedCurrency(periodChange)}
-          </div>
-          <div className={"mt-1 text-xs " + positionValueClass(periodChangePercent)}>
-            {periodChangePercent === null
-              ? "No earlier daily close"
-              : formatSignedPercent(periodChangePercent)}
-          </div>
+      <div className={surfaceClass}>
+        <div className="mb-2 text-sm font-semibold text-[var(--foreground)]">
+          Account-wide equity history
         </div>
-
-        <div className="rounded-md bg-[linear-gradient(180deg,rgba(255,255,255,0.095),rgba(255,255,255,0.055))] px-4 py-3 shadow-[0_14px_32px_var(--shadow)]">
-          <div className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
-            Daily Closes
-          </div>
-          <div className="mt-1 font-mono text-2xl font-semibold text-[var(--foreground)]">
-            {dailyRows.length}
-          </div>
-          <div className="mt-1 text-xs text-[var(--muted)]">
-            Trading dates in selected range
-          </div>
-        </div>
+        <EquityChart rows={rows} />
       </div>
 
       <div className="flex justify-end">
@@ -1752,10 +1622,20 @@ function AccountEquityPanel({
 function TradeLogsPanel({
   rows,
   timezone,
+  metadata,
 }: {
   rows: TradeExecution[];
   timezone: string;
+  metadata: DatasetMetadata;
 }) {
+  if (!datasetAvailable(metadata)) {
+    return (
+      <Panel title="Raw Trade Executions">
+        <DatasetUnavailableMessage label="Trade executions" metadata={metadata} />
+      </Panel>
+    );
+  }
+
   const columns: TableColumn<TradeExecution>[] = [
     {
       key: "timestamp",
@@ -1813,16 +1693,16 @@ function TradeLogsPanel({
       key: "commission",
       label: "Commission",
       align: "right",
-      render: (row) => formatCurrency(toNumber(row.commission)),
+      render: (row) => commissionTableValue(row.commission),
     },
     {
       key: "pnl",
       label: "Trade P&L",
       align: "right",
-      render: (row) => formatCurrency(toNumber(row.realized_pnl)),
+      render: (row) => pnlTableValue(row.realized_pnl),
     },
     { key: "status", label: "Status", render: (row) => row.status ?? "-" },
-    { key: "notes", label: "Notes", render: (row) => row.notes ?? "" },
+    { key: "notes", label: "Notes", wrap: true, render: (row) => row.notes ?? "" },
   ];
   const sortedRows = sortByNewest(rows);
 
@@ -1848,10 +1728,10 @@ function TradeLogsPanel({
                 row.symbol ?? "-",
                 row.sec_type ?? "-",
                 row.side ?? "-",
-                formatNumber(row.quantity, 0),
-                formatNumber(row.price),
-                formatCurrency(toNumber(row.commission)),
-                formatCurrency(toNumber(row.realized_pnl)),
+                toOptionalNumber(row.quantity) ?? "",
+                toOptionalNumber(row.price) ?? "",
+                row.commission ?? "",
+                row.realized_pnl ?? "",
                 row.status ?? "-",
                 row.notes ?? "",
               ]),
@@ -1887,6 +1767,7 @@ function DiagnosticsPanel({
   endDate,
   timezone,
   data,
+  health,
 }: {
   strategyFamilyFilter: string;
   strategyVersion: string;
@@ -1895,20 +1776,30 @@ function DiagnosticsPanel({
   endDate: string;
   timezone: string;
   data: DashboardData;
+  health: HealthState;
 }) {
-  const counts = recordCounts(data);
+  const datasetRows = Object.entries(data.meta.datasets).map(
+    ([name, metadata]) => [
+      `${datasetLabels[name as keyof typeof datasetLabels]} dataset`,
+      datasetMetadataSummary(metadata),
+    ],
+  );
   const rows = [
     ["Strategy family filter", strategyFamilyFilter],
     ["Strategy version filter", strategyVersion],
     ["Account filter", accountId],
     ["Date range", `${startDate} to ${endDate}`],
     ["Timezone", timezone],
-    ["Execution records", String(counts.executions)],
-    ["Account equity records", String(counts.equity)],
-    ["Strategy daily P&L records", String(counts.pnl)],
-    ["Strategy position snapshots", String(counts.positions)],
-    ["Equity color", CHART_COLORS.profit],
-    ["Loss color", CHART_COLORS.loss],
+    ["Backend health", health.status],
+    ["Health checked", formatTimestamp(health.checkedAt ?? undefined, timezone)],
+    ["Query requested", formatTimestamp(data.meta.requestedAt, timezone)],
+    ["Query completed", formatTimestamp(data.meta.completedAt, timezone)],
+    ["Query result", data.meta.partial ? "Partial" : "Complete"],
+    ["Execution records", String(data.execRows.length)],
+    ["Account equity records", String(data.perfRows.length)],
+    ["Strategy daily P&L records", String(data.pnlRows.length)],
+    ["Strategy position snapshots", String(data.positionRows.length)],
+    ...datasetRows,
   ];
 
   return (
@@ -1941,98 +1832,310 @@ export function DashboardShell() {
   const [timezone, setTimezone] = useState("America/New_York");
   const [customStart, setCustomStart] = useState(initialToday);
   const [customEnd, setCustomEnd] = useState(initialToday);
+  const [, setCalendarDay] = useState(initialToday);
   const [section, setSection] = useState<SectionId>("overview");
-  const [data, setData] = useState<DashboardData>(emptyData);
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [loadedQueryKey, setLoadedQueryKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [filterError, setFilterError] = useState<string | null>(null);
   const [dataError, setDataError] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
-  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [health, setHealth] = useState<HealthState>({
+    status: "checking",
+    checkedAt: null,
+    error: null,
+  });
+  const [healthRefreshKey, setHealthRefreshKey] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const dataRequestId = useRef(0);
+  const filterRequestId = useRef(0);
+  const selectionsRef = useRef({ selectedFamilies, selectedVersions, accountId });
 
-  const range = useMemo(
-    () => resolveDateRange(datePreset, timezone, customStart, customEnd),
-    [customEnd, customStart, datePreset, timezone],
+  const range = resolveDateRange(
+    datePreset,
+    timezone,
+    customStart,
+    customEnd,
   );
+  const strategyScopes = useMemo<StrategyScope[]>(() => {
+    if (selectedFamilies.includes("ALL")) {
+      return [{ strategyFamily: "ALL", strategyVersion: "ALL" }];
+    }
+    return selectedFamilies.flatMap((family) => {
+      if (selectedVersions.includes("ALL")) {
+        return [{ strategyFamily: family, strategyVersion: "ALL" }];
+      }
+      const option = filters.strategy_families.find((item) => item.family === family);
+      const availableVersions = new Set(
+        option?.versions.map((item) => item.version).filter((item): item is string => Boolean(item)) ?? [],
+      );
+      return selectedVersions
+        .filter((version) => availableVersions.has(version))
+        .map((version) => ({ strategyFamily: family, strategyVersion: version }));
+    });
+  }, [filters.strategy_families, selectedFamilies, selectedVersions]);
+  const querySnapshot = useMemo(
+    () => ({
+      strategyFamilies: selectedFamilies,
+      strategyVersions: selectedVersions,
+      strategyScopes,
+      accountId,
+      startDate: range.startDate,
+      endDate: range.endDate,
+      timezone,
+      section,
+      ...includesForSection(section),
+    }),
+    [
+      accountId,
+      range.endDate,
+      range.startDate,
+      section,
+      selectedFamilies,
+      selectedVersions,
+      strategyScopes,
+      timezone,
+    ],
+  );
+  const queryKey = useMemo(() => JSON.stringify(querySnapshot), [querySnapshot]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setCalendarDay(todayInTimeZone(timezone));
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [timezone]);
+
+  useEffect(() => {
+    const mobileViewport = window.matchMedia("(max-width: 1023px)");
+    let disposed = false;
+
+    function collapsedForViewport(isMobile: boolean) {
+      if (isMobile) {
+        return true;
+      }
+      return (
+        window.localStorage.getItem("quant-web:sidebar-collapsed") === "true"
+      );
+    }
+
+    queueMicrotask(() => {
+      if (!disposed) {
+        setSidebarCollapsed(collapsedForViewport(mobileViewport.matches));
+      }
+    });
+    function handleViewportChange(event: MediaQueryListEvent) {
+      setSidebarCollapsed(collapsedForViewport(event.matches));
+    }
+    mobileViewport.addEventListener("change", handleViewportChange);
+    return () => {
+      disposed = true;
+      mobileViewport.removeEventListener("change", handleViewportChange);
+    };
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
+    const requestId = ++filterRequestId.current;
     fetch("/api/dashboard/filters", {
       cache: "no-store",
       signal: controller.signal,
     })
       .then((response) => readApi<FilterOptions>(response))
       .then((payload) => {
+        if (filterRequestId.current !== requestId) {
+          return;
+        }
+        const current = selectionsRef.current;
+        const validFamilies = new Set(payload.strategy_families.map((item) => item.family));
+        let nextFamilies = current.selectedFamilies.includes("ALL")
+          ? ["ALL"]
+          : current.selectedFamilies.filter((family) => validFamilies.has(family));
+        if (current.selectedFamilies.length > 0 && nextFamilies.length === 0) {
+          nextFamilies = ["ALL"];
+        }
+        const validVersions = new Set(
+          payload.strategy_families
+            .filter((item) => nextFamilies.includes(item.family))
+            .flatMap((item) => item.versions)
+            .map((item) => item.version)
+            .filter((item): item is string => Boolean(item)),
+        );
+        const nextVersions =
+          nextFamilies.length === 0 || nextFamilies.includes("ALL") || current.selectedVersions.includes("ALL")
+            ? ["ALL"]
+            : current.selectedVersions.filter((version) => validVersions.has(version));
+        const validAccounts = new Set(payload.accounts.map((account) => account.account_id));
+        const reconciledVersions = nextVersions.length > 0 ? nextVersions : ["ALL"];
+        const nextAccountId =
+          current.accountId === "ALL" || validAccounts.has(current.accountId)
+            ? current.accountId
+            : "ALL";
+        selectionsRef.current = {
+          selectedFamilies: nextFamilies,
+          selectedVersions: reconciledVersions,
+          accountId: nextAccountId,
+        };
         setFilters(payload);
+        setSelectedFamilies((previous) =>
+          sameSelection(previous, nextFamilies) ? previous : nextFamilies,
+        );
+        setSelectedVersions((previous) =>
+          sameSelection(previous, reconciledVersions)
+            ? previous
+            : reconciledVersions,
+        );
+        setAccountId((previous) =>
+          previous === nextAccountId ? previous : nextAccountId,
+        );
         setFilterError(null);
       })
       .catch((error: Error) => {
-        if (error.name !== "AbortError") {
-          setFilters(emptyFilters);
+        if (error.name !== "AbortError" && filterRequestId.current === requestId) {
           setFilterError(error.message);
+          setHealthRefreshKey((value) => value + 1);
         }
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (filterRequestId.current === requestId) {
+        filterRequestId.current += 1;
+      }
+    };
   }, [refreshKey]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    const includes = includesForSection(section);
+    let disposed = false;
+    let checking = false;
+    let controller: AbortController | null = null;
 
-    queueMicrotask(() => {
-      if (controller.signal.aborted) {
+    async function checkHealth() {
+      if (checking) {
+        return;
+      }
+      checking = true;
+      controller = new AbortController();
+      try {
+        const response = await fetch("/api/health", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const payload = (await response.json()) as ApiResponse<HealthPayload>;
+        if (disposed) {
+          return;
+        }
+        const online =
+          response.ok &&
+          payload.ok &&
+          payload.data?.backend?.reachable === true &&
+          payload.data.backend.protectedAccess === true;
+        setHealth({
+          status: online ? "online" : "offline",
+          checkedAt: payload.data?.checkedAt ?? new Date().toISOString(),
+          error: online ? null : payload.error?.message ?? "Backend unavailable",
+        });
+      } catch (error) {
+        if (!disposed && (!(error instanceof Error) || error.name !== "AbortError")) {
+          setHealth({
+            status: "offline",
+            checkedAt: new Date().toISOString(),
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } finally {
+        checking = false;
+      }
+    }
+
+    void checkHealth();
+    const timer = window.setInterval(checkHealth, 30_000);
+    return () => {
+      disposed = true;
+      controller?.abort();
+      window.clearInterval(timer);
+    };
+  }, [healthRefreshKey]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const requestId = ++dataRequestId.current;
+
+    queueMicrotask(async () => {
+      if (controller.signal.aborted || dataRequestId.current !== requestId) {
         return;
       }
       setLoading(true);
       setDataError(null);
 
-      fetch("/api/dashboard/data", {
-        method: "POST",
-        cache: "no-store",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          strategyFamilies: selectedFamilies,
-          strategyVersions: selectedVersions,
-          accountId,
-          startDate: range.startDate,
-          endDate: range.endDate,
-          timezone,
-          section,
-          ...includes,
-        }),
-      })
-        .then((response) => readApi<DashboardData>(response))
-        .then((payload) => {
+      try {
+        const response = await fetch("/api/dashboard/data", {
+          method: "POST",
+          cache: "no-store",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: queryKey,
+        });
+        const payload = await readApi<DashboardData>(response);
+        if (dataRequestId.current === requestId) {
           setData(payload);
           setDataError(null);
-          setLastUpdatedAt(new Date().toISOString());
-        })
-        .catch((error: Error) => {
-          if (error.name !== "AbortError") {
-            setData(emptyData);
-            setDataError(error.message);
-          }
-        })
-        .finally(() => setLoading(false));
+          setLoadedQueryKey(queryKey);
+        }
+      } catch (error) {
+        if (
+          (!(error instanceof Error) || error.name !== "AbortError") &&
+          dataRequestId.current === requestId
+        ) {
+          setLoadedQueryKey(null);
+          setDataError(error instanceof Error ? error.message : String(error));
+          setHealthRefreshKey((value) => value + 1);
+        }
+      } finally {
+        if (dataRequestId.current === requestId) {
+          setLoading(false);
+        }
+      }
     });
 
-    return () => controller.abort();
-  }, [
-    accountId,
-    range.endDate,
-    range.startDate,
-    refreshKey,
-    section,
-    selectedFamilies,
-    selectedVersions,
-    timezone,
-  ]);
+    return () => {
+      controller.abort();
+      if (dataRequestId.current === requestId) {
+        dataRequestId.current += 1;
+      }
+    };
+  }, [queryKey, refreshKey]);
 
   function handleStrategyFamiliesChange(values: string[]) {
+    selectionsRef.current = {
+      ...selectionsRef.current,
+      selectedFamilies: values,
+      selectedVersions: ["ALL"],
+    };
     setSelectedFamilies(values);
     setSelectedVersions(["ALL"]);
+  }
+
+  function handleStrategyVersionsChange(values: string[]) {
+    selectionsRef.current = {
+      ...selectionsRef.current,
+      selectedVersions: values,
+    };
+    setSelectedVersions(values);
+  }
+
+  function handleAccountChange(value: string) {
+    selectionsRef.current = {
+      ...selectionsRef.current,
+      accountId: value,
+    };
+    setAccountId(value);
+  }
+
+  function handleReload() {
+    setLoadedQueryKey(null);
+    setRefreshKey((value) => value + 1);
   }
 
   async function handleRefresh() {
@@ -2044,8 +2147,11 @@ export function DashboardShell() {
         method: "POST",
         cache: "no-store",
       });
-      await readApi(response);
+      const result = await readApi<ReconciliationResult>(response);
+      setLastSyncAt(result.completed_at);
+      setLoadedQueryKey(null);
       setRefreshKey((value) => value + 1);
+      setHealthRefreshKey((value) => value + 1);
     } catch (error) {
       setSyncError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -2053,10 +2159,24 @@ export function DashboardShell() {
     }
   }
 
+  function handleToggleSidebar() {
+    setSidebarCollapsed((value) => {
+      const nextValue = !value;
+      if (!window.matchMedia("(max-width: 1023px)").matches) {
+        window.localStorage.setItem(
+          "quant-web:sidebar-collapsed",
+          String(nextValue),
+        );
+      }
+      return nextValue;
+    });
+  }
+
   const familyLabel = selectionLabel(selectedFamilies, "ALL");
   const versionLabel = selectionLabel(selectedVersions, "ALL VERSIONS");
+  const currentData = loadedQueryKey === queryKey ? data : null;
 
-  const currentPanel = (() => {
+  const currentPanel = currentData ? (() => {
     if (section === "overview") {
       return (
         <OverviewPanel
@@ -2066,21 +2186,44 @@ export function DashboardShell() {
               : `${familyLabel} / ${versionLabel}`
           }
           accountId={accountId}
-          data={data}
+          data={currentData}
         />
       );
     }
     if (section === "strategy-pnl") {
-      return <StrategyPnlPanel rows={data.pnlRows} />;
+      return (
+        <StrategyPnlPanel
+          rows={currentData.pnlRows}
+          metadata={currentData.meta.datasets.pnl}
+        />
+      );
     }
     if (section === "account-equity") {
-      return <AccountEquityPanel rows={data.perfRows} timezone={timezone} />;
+      return (
+        <AccountEquityPanel
+          rows={currentData.perfRows}
+          timezone={timezone}
+          metadata={currentData.meta.datasets.equity}
+        />
+      );
     }
     if (section === "positions") {
-      return <StrategyPositionsPanel rows={data.positionRows} timezone={timezone} />;
+      return (
+        <StrategyPositionsPanel
+          rows={currentData.positionRows}
+          timezone={timezone}
+          metadata={currentData.meta.datasets.positions}
+        />
+      );
     }
     if (section === "trade-logs") {
-      return <TradeLogsPanel rows={data.execRows} timezone={timezone} />;
+      return (
+        <TradeLogsPanel
+          rows={currentData.execRows}
+          timezone={timezone}
+          metadata={currentData.meta.datasets.executions}
+        />
+      );
     }
     return (
       <DiagnosticsPanel
@@ -2090,15 +2233,27 @@ export function DashboardShell() {
         startDate={range.startDate}
         endDate={range.endDate}
         timezone={timezone}
-        data={data}
+        data={currentData}
+        health={health}
       />
     );
-  })();
+  })() : null;
+  const queryStatus = dataError
+    ? "failed"
+    : loading
+      ? "loading"
+      : currentData
+        ? currentData.meta.partial
+          ? "partial"
+          : "current"
+        : "pending";
+  const syncStatus = syncing ? "running" : syncError ? "failed" : lastSyncAt ? "complete" : "not run";
 
   return (
     <div className="relative min-h-screen text-[var(--foreground)] lg:flex">
       <SidebarFilters
         collapsed={sidebarCollapsed}
+        apiStatus={health.status}
         filters={filters}
         strategyFamilies={selectedFamilies}
         strategyVersions={selectedVersions}
@@ -2108,13 +2263,13 @@ export function DashboardShell() {
         customStart={customStart}
         customEnd={customEnd}
         onStrategyFamiliesChange={handleStrategyFamiliesChange}
-        onStrategyVersionsChange={setSelectedVersions}
-        onAccountChange={setAccountId}
+        onStrategyVersionsChange={handleStrategyVersionsChange}
+        onAccountChange={handleAccountChange}
         onPresetChange={setDatePreset}
         onTimezoneChange={setTimezone}
         onCustomStartChange={setCustomStart}
         onCustomEndChange={setCustomEnd}
-        onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+        onToggleCollapsed={handleToggleSidebar}
       />
 
       <main className="min-w-0 flex-1 p-5 md:p-8 xl:p-10">
@@ -2122,17 +2277,84 @@ export function DashboardShell() {
           <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
             <div className="min-w-0 space-y-4 pr-14 md:pr-0">
               <div className="flex flex-wrap gap-3 font-mono text-[10px] uppercase tracking-normal text-[var(--muted)]">
-                <span className={`${statusPillClass} border-[#9cf62f]/20 bg-[rgba(156,246,47,0.1)] text-[#b8ff5d]`}>
-                  <span className="status-dot" aria-hidden="true" />
-                  Live Monitor
+                <span
+                  role="status"
+                  title={health.error ?? undefined}
+                  className={`${statusPillClass} ${
+                    health.status === "online"
+                      ? "border-[#9cf62f]/20 bg-[rgba(156,246,47,0.1)] text-[#b8ff5d]"
+                      : health.status === "offline"
+                        ? "border-rose-300/20 bg-rose-400/[0.1] text-rose-200"
+                        : "border-amber-300/20 bg-amber-400/[0.1] text-amber-200"
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`inline-block h-2 w-2 rounded-full ${
+                      health.status === "online"
+                        ? "bg-[#9cf62f] shadow-[0_0_0_4px_rgba(156,246,47,0.12),0_0_18px_rgba(156,246,47,0.34)]"
+                        : health.status === "offline"
+                          ? "bg-rose-400 shadow-[0_0_0_4px_rgba(251,113,133,0.12)]"
+                          : "bg-amber-300 shadow-[0_0_0_4px_rgba(252,211,77,0.12)]"
+                    }`}
+                  />
+                  Backend {health.status}
                 </span>
-                <span className={statusPillClass}>
-                  <SignalIcon icon={RadioTower} tone="cyan" className="h-5 w-5" iconClassName="h-3 w-3" />
-                  API Synced
+                <span
+                  role="status"
+                  className={`${statusPillClass} ${
+                    queryStatus === "current"
+                      ? "text-emerald-200"
+                      : queryStatus === "failed"
+                        ? "text-rose-200"
+                        : queryStatus === "partial"
+                          ? "text-amber-200"
+                          : "text-cyan-200"
+                  }`}
+                >
+                  <SignalIcon
+                    icon={RadioTower}
+                    tone={
+                      queryStatus === "failed"
+                        ? "rose"
+                        : queryStatus === "partial"
+                          ? "amber"
+                          : queryStatus === "current"
+                            ? "green"
+                            : "cyan"
+                    }
+                    className="h-5 w-5"
+                    iconClassName="h-3 w-3"
+                  />
+                  Query {queryStatus}
                 </span>
-                <span className={statusPillClass}>
-                  <SignalIcon icon={ShieldCheck} tone="green" className="h-5 w-5" iconClassName="h-3 w-3" />
-                  Read Only
+                <span
+                  role="status"
+                  className={`${statusPillClass} ${
+                    syncStatus === "failed"
+                      ? "text-rose-200"
+                      : syncStatus === "complete"
+                        ? "text-emerald-200"
+                        : syncStatus === "running"
+                          ? "text-cyan-200"
+                          : "text-[var(--muted-strong)]"
+                  }`}
+                >
+                  <SignalIcon
+                    icon={ShieldCheck}
+                    tone={
+                      syncStatus === "failed"
+                        ? "rose"
+                        : syncStatus === "complete"
+                          ? "green"
+                          : syncStatus === "running"
+                            ? "cyan"
+                            : "amber"
+                    }
+                    className="h-5 w-5"
+                    iconClassName="h-3 w-3"
+                  />
+                  Reconciliation {syncStatus}
                 </span>
               </div>
               <h1 className="text-3xl font-semibold text-[var(--foreground)] md:text-4xl">
@@ -2159,12 +2381,23 @@ export function DashboardShell() {
               </div>
             </div>
             <div className="flex w-full max-w-full flex-col gap-2 justify-self-stretch self-start md:w-fit md:items-end md:justify-self-end md:pt-14 lg:pt-0">
+              <div className="flex w-full flex-col gap-2 sm:flex-row md:w-auto">
+                <button
+                  type="button"
+                  title="Reload the current query without running reconciliation"
+                  disabled={loading || syncing}
+                  onClick={handleReload}
+                  className={`${secondaryButtonClass} w-full whitespace-nowrap sm:w-auto`}
+                >
+                  <RefreshCw className={`h-4 w-4 ${loading && !syncing ? "animate-spin" : ""}`} aria-hidden="true" />
+                  {loading && !syncing ? "Reloading..." : dataError ? "Retry data" : "Reload data"}
+                </button>
               <button
                 type="button"
-                title={syncing ? "Synchronizing trading data" : "Refresh"}
+                title="Run broker reconciliation, then reload dashboard data"
                 disabled={loading || syncing}
                 onClick={handleRefresh}
-                className={`${primaryButtonClass} w-full max-w-none shrink-0 self-start whitespace-nowrap md:w-auto md:max-w-max md:self-end`}
+                className={`${primaryButtonClass} w-full max-w-none shrink-0 self-start whitespace-nowrap sm:w-auto md:max-w-max md:self-end`}
               >
                 <SignalIcon
                   icon={RefreshCw}
@@ -2172,14 +2405,16 @@ export function DashboardShell() {
                   className="h-6 w-6"
                   iconClassName={`h-3.5 w-3.5 ${loading || syncing ? "animate-spin" : ""}`}
                 />
-                {syncing ? "Syncing..." : "Refresh"}
+                {syncing ? "Reconciling..." : "Reconcile & refresh"}
               </button>
-              <div className="w-full max-w-full truncate whitespace-nowrap rounded-md bg-white/[0.05] px-3 py-1.5 text-center font-mono text-[11px] uppercase tracking-normal text-[var(--muted)] md:w-auto md:text-right">
-                {syncing
-                  ? "Syncing with IBKR..."
-                  : loading
-                  ? "Updating..."
-                  : `Last update: ${formatTimestamp(lastUpdatedAt ?? undefined, timezone)}`}
+              </div>
+              <div className="w-full max-w-full rounded-md bg-white/[0.05] px-3 py-1.5 text-center font-mono text-[10px] uppercase leading-5 tracking-normal text-[var(--muted)] md:w-auto md:text-right">
+                <div>
+                  Query completed: {formatTimestamp(currentData?.meta.completedAt, timezone)}
+                </div>
+                <div>
+                  Reconciliation: {lastSyncAt ? formatTimestamp(lastSyncAt, timezone) : "Not run this session"}
+                </div>
               </div>
             </div>
           </div>
@@ -2196,7 +2431,7 @@ export function DashboardShell() {
           ) : null}
           {dataError ? (
             <StatusMessage tone="error">
-              Dashboard API unavailable: {dataError}
+              Dashboard data unavailable: {dataError}. Use Retry data to try this query again.
             </StatusMessage>
           ) : null}
           {syncError ? (
@@ -2205,11 +2440,15 @@ export function DashboardShell() {
             </StatusMessage>
           ) : null}
           {syncing ? (
-            <StatusMessage tone="loading">Synchronizing trades with IBKR...</StatusMessage>
+            <StatusMessage tone="loading">Reconciling trading data with IBKR...</StatusMessage>
           ) : loading ? (
             <StatusMessage tone="loading">Loading dashboard data...</StatusMessage>
           ) : null}
-          {currentPanel}
+          {currentData ? <DataQualityNotice data={currentData} /> : null}
+          {!loading && !dataError && !currentData ? (
+            <StatusMessage tone="loading">Preparing the dashboard query...</StatusMessage>
+          ) : null}
+          {!loading && !dataError ? currentPanel : null}
         </div>
       </main>
     </div>

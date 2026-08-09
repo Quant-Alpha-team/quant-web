@@ -1,7 +1,6 @@
 import type {
   AccountEquity,
   DatePreset,
-  DashboardData,
   KpiCards,
   SectionId,
   StrategyDailyPnl,
@@ -17,7 +16,7 @@ export const DATE_PRESETS: DatePreset[] = [
   "Last 14 Days",
   "Last 30 Days",
   "Month to Date",
-  "All Time",
+  "Last 10 Years",
   "Custom Date",
 ];
 
@@ -77,7 +76,7 @@ export function resolveDateRange(
     startDate = addDays(today, -29);
   } else if (preset === "Month to Date") {
     startDate = `${today.slice(0, 8)}01`;
-  } else if (preset === "All Time") {
+  } else if (preset === "Last 10 Years") {
     startDate = addDays(today, -3650);
   } else if (preset === "Custom Date") {
     startDate = customStart || today;
@@ -100,14 +99,18 @@ export function includesForSection(section: SectionId) {
 }
 
 export function toNumber(value: unknown) {
+  return toOptionalNumber(value) ?? 0;
+}
+
+export function toOptionalNumber(value: unknown) {
   if (typeof value === "number") {
-    return Number.isFinite(value) ? value : 0;
+    return Number.isFinite(value) ? value : null;
   }
-  if (typeof value === "string") {
+  if (typeof value === "string" && value.trim()) {
     const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
+    return Number.isFinite(parsed) ? parsed : null;
   }
-  return 0;
+  return null;
 }
 
 type StrategyIdentityRow = {
@@ -124,7 +127,7 @@ export function strategyIdentity(row: StrategyIdentityRow) {
   let version: string | null = null;
   if (typeof row.strategy_version === "string" && row.strategy_version.trim()) {
     version = row.strategy_version.trim();
-  } else if (row.strategy_version === undefined && !row.strategy_family) {
+  } else if (row.strategy_version == null && !row.strategy_family) {
     version = legacyMatch?.[2]?.toUpperCase() ?? null;
   }
   return { family, version, strategyName };
@@ -154,17 +157,6 @@ function equityDateKey(row: AccountEquity) {
   return row.date?.trim() || row.timestamp?.slice(0, 10) || "";
 }
 
-function optionalNumber(value: unknown) {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
-  }
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
 function newestValue(values: Array<string | undefined>) {
   let newest: string | undefined;
   for (const value of values) {
@@ -184,6 +176,9 @@ export function aggregateEquityHistory(rows: AccountEquity[]) {
   const latestByAccountDate = new Map<string, AccountEquity>();
 
   for (const row of rows) {
+    if (toOptionalNumber(row.equity_value) === null) {
+      continue;
+    }
     const date = equityDateKey(row);
     if (!date) {
       continue;
@@ -229,7 +224,7 @@ export function aggregateEquityHistory(rows: AccountEquity[]) {
           ? currentRows[0]?.broker_account_id
           : "ALL",
       equity_value: currentRows.reduce(
-        (total, row) => total + toNumber(row.equity_value),
+        (total, row) => total + (toOptionalNumber(row.equity_value) ?? 0),
         0,
       ),
     });
@@ -250,10 +245,6 @@ export function computeKpis(
     navChangePercent: null,
     openPnl: null,
     periodRealizedPnl: null,
-    totalCommission: execRows.reduce(
-      (total, row) => total + toNumber(row.commission),
-      0,
-    ),
     periodRealizedRecords: 0,
     totalTrades: execRows.length,
     openPositions: positionRows.length,
@@ -268,11 +259,14 @@ export function computeKpis(
 
   const latestEquityByAccount = new Map<string, AccountEquity>();
   for (const row of perfRows) {
+    if (toOptionalNumber(row.equity_value) === null) {
+      continue;
+    }
     const account = equityAccountKey(row);
     const current = latestEquityByAccount.get(account);
     if (
       !current ||
-      timeValue(row.timestamp ?? row.date) >
+      timeValue(row.timestamp ?? row.date) >=
         timeValue(current.timestamp ?? current.date)
     ) {
       latestEquityByAccount.set(account, row);
@@ -296,7 +290,7 @@ export function computeKpis(
   }
 
   const recordedRealizedRows = pnlRows.filter(
-    (row) => optionalNumber(row.realized_pnl) !== null,
+    (row) => toOptionalNumber(row.realized_pnl) !== null,
   );
   kpi.periodRealizedRecords = new Set(
     recordedRealizedRows.map(
@@ -313,8 +307,8 @@ export function computeKpis(
 
   const pricedPositions = positionRows.filter(
     (row) =>
-      optionalNumber(row.market_value) !== null &&
-      optionalNumber(row.unrealized_pnl) !== null,
+      toOptionalNumber(row.market_value) !== null &&
+      toOptionalNumber(row.unrealized_pnl) !== null,
   );
   kpi.pricedPositions = pricedPositions.length;
   if (positionRows.length === 0) {
@@ -329,16 +323,19 @@ export function computeKpis(
   return kpi;
 }
 
-export function formatCurrency(value: number) {
+export function formatCurrency(value: number, currency = "USD") {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency,
     maximumFractionDigits: 2,
   }).format(value);
 }
 
 export function formatNumber(value: unknown, digits = 2) {
-  const numeric = toNumber(value);
+  const numeric = toOptionalNumber(value);
+  if (numeric === null) {
+    return "—";
+  }
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: digits,
     minimumFractionDigits: digits,
@@ -456,14 +453,13 @@ export function pnlSummary(rows: StrategyDailyPnl[]) {
       continue;
     }
     const strategy = familyDay.family;
-    const entry =
-      byFamily.get(strategy) ??
-      byFamily
-        .set(strategy, { strategy, pnl: 0, wins: 0, losses: 0 })
-        .get(strategy);
-    if (!entry) {
-      continue;
-    }
+    const entry = byFamily.get(strategy) ?? {
+      strategy,
+      pnl: 0,
+      wins: 0,
+      losses: 0,
+    };
+    byFamily.set(strategy, entry);
     const pnl = familyDay.pnl;
     entry.pnl += pnl;
     if (!familyDay.complete) {
@@ -489,13 +485,4 @@ export function pnlSummary(rows: StrategyDailyPnl[]) {
         entry.wins + entry.losses > 0 || Math.abs(entry.pnl) >= 0.005,
     )
     .sort((a, b) => b.pnl - a.pnl);
-}
-
-export function recordCounts(data: DashboardData) {
-  return {
-    executions: data.execRows.length,
-    equity: data.perfRows.length,
-    pnl: data.pnlRows.length,
-    positions: data.positionRows.length,
-  };
 }

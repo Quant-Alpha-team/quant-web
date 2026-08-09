@@ -40,8 +40,10 @@ Browser
   └── /api/health ─────────────┘
 ```
 
-Dashboard requests are uncached and paginated. Per-dataset row limits prevent
-unbounded responses and can be adjusted through environment variables.
+Dashboard requests are uncached, paginated, and isolated by dataset. Per-dataset
+row limits and bounded backend concurrency prevent unbounded fan-out. If a
+backend scope fails, returns invalid rows, or reaches a limit, the UI identifies
+the affected dataset as partial instead of presenting incomplete values as exact.
 
 ## Requirements
 
@@ -61,6 +63,9 @@ unbounded responses and can be adjusted through environment variables.
 
 Except for the health check, backend requests use
 `Authorization: Token <API_TOKEN>` unless authentication is explicitly disabled.
+The public backend health route is used by launcher preflight; the dashboard's
+own `/api/health` readiness result also probes protected filter access, so an
+invalid or expired token is reported as offline instead of healthy.
 
 ## Quick start
 
@@ -107,12 +112,15 @@ already present in the shell.
 | `API_TIMEOUT_SECONDS` | `15` | Timeout for normal backend requests and launcher preflight |
 | `API_SYNC_TIMEOUT_SECONDS` | `180` | Timeout for reconciliation requests |
 | `API_PAGE_SIZE` | `500` | Rows requested per backend page; capped at `2000` |
+| `DASHBOARD_API_CONCURRENCY` | `4` | Maximum concurrent backend dataset/scope requests; capped at `8` |
 | `API_PREFLIGHT_STRICT` | `false` | Makes the `quant-web` launcher exit when its backend preflight fails |
 
 ### Dataset limits
 
-Each limit defaults to `5000` rows. Set a value to `0` to disable that dataset's
-cap.
+Each limit defaults to `5000` source rows across the entire requested dataset,
+including all selected strategy scopes. Set a value to `0` to disable that
+dataset's cap. The response metadata and dashboard warning identify truncated or
+otherwise incomplete data.
 
 | Variable | Dataset |
 | --- | --- |
@@ -146,6 +154,9 @@ created or written, file logging is disabled and messages continue on stdout.
 | `npm run build` | Create the standalone production build |
 | `npm run start` | Start a previously built production server |
 | `npm run lint` | Run ESLint |
+| `npm run typecheck` | Run TypeScript without emitting files |
+| `npm test` | Run focused dashboard helper tests |
+| `npm run check` | Run lint, typecheck, and tests |
 
 For a local production run:
 
@@ -235,6 +246,8 @@ quant-web/
 │   ├── dashboard.ts                # Date, KPI, chart, and formatting helpers
 │   ├── logger.ts                   # Server-side log rotation
 │   └── types.ts                    # Shared TypeScript contracts
+├── tests/
+│   └── dashboard.test.mts          # Focused helper regression tests
 ├── public/                         # Static assets
 ├── scripts/
 │   └── build.sh                    # Docker Buildx helper
@@ -260,10 +273,11 @@ quant-web/
 
 ## Development checks
 
-Run both checks before submitting changes:
+Run the fast validation suite, then create a production build before submitting
+changes:
 
 ```bash
-npm run lint
+npm run check
 npm run build
 ```
 

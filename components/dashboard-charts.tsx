@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import {
   Bar,
   BarChart,
@@ -38,9 +39,63 @@ const tooltipStyle = {
   color: "#f4fbff",
 };
 
-const chartFrameClass = "h-[360px] min-h-[360px] min-w-0 w-full";
-const chartInitialDimension = { width: 640, height: 360 };
 const minimumVisiblePnl = 0.005;
+
+function ChartFrame({ children }: { children: React.ReactElement }) {
+  return (
+    <div
+      aria-hidden="true"
+      className="h-[300px] min-h-[300px] min-w-0 w-full sm:h-[360px] sm:min-h-[360px]"
+    >
+      <ResponsiveContainer
+        debounce={50}
+        height="100%"
+        initialDimension={{ width: 640, height: 360 }}
+        minHeight={300}
+        minWidth={0}
+        width="100%"
+      >
+        {children}
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function ChartEmptyState({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      role="status"
+      className="flex min-h-24 items-center justify-center rounded-md border border-dashed border-white/[0.1] px-4 text-center text-sm text-[var(--muted)]"
+    >
+      {children}
+    </div>
+  );
+}
+
+function currencyTickFormatter(value: unknown) {
+  return "$" + Number(value).toLocaleString();
+}
+
+function chronologicalLabel(
+  left: Record<string, string | number>,
+  right: Record<string, string | number>,
+) {
+  const leftLabel = String(left.date ?? left.label ?? "");
+  const rightLabel = String(right.date ?? right.label ?? "");
+  const leftTime = Date.parse(leftLabel);
+  const rightTime = Date.parse(rightLabel);
+
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) {
+    return leftTime - rightTime;
+  }
+  if (Number.isFinite(leftTime) !== Number.isFinite(rightTime)) {
+    return Number.isFinite(leftTime) ? -1 : 1;
+  }
+  return leftLabel.localeCompare(rightLabel, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
 
 function PnlTooltip({
   active,
@@ -123,28 +178,67 @@ function centeredYAxisDomain(values: number[]): [number, number] {
 }
 
 export function EquityChart({ rows }: { rows: AccountEquity[] }) {
-  const data = downsample(aggregateEquityHistory(rows), 3000).map((row) => ({
-    label: formatDate(row.date),
-    equity: toNumber(row.equity_value),
-  }));
+  const titleId = useId();
+  const summaryId = useId();
+  const series = aggregateEquityHistory(rows)
+    .map((row) => ({
+      label: formatDate(row.date),
+      equity: toNumber(row.equity_value),
+    }))
+    .sort(chronologicalLabel);
+  const data = downsample(series, 3000);
   const yDomain = centeredYAxisDomain(data.map((item) => item.equity));
+  const firstPoint = series[0];
+  const lastPoint = series.at(-1);
+
+  if (!firstPoint || !lastPoint) {
+    return (
+      <ChartEmptyState>
+        No valid equity points are available in the selected range.
+      </ChartEmptyState>
+    );
+  }
+
+  const equityValues = series.map((item) => item.equity);
+  const summary =
+    `Equity history from ${firstPoint.label} to ${lastPoint.label} across ${series.length} daily closes. It began at ${formatCurrency(firstPoint.equity)}, ended at ${formatCurrency(lastPoint.equity)}, reached a low of ${formatCurrency(Math.min(...equityValues))}, and a high of ${formatCurrency(Math.max(...equityValues))}.` +
+    (data.length < series.length
+      ? ` The visual chart is sampled to ${data.length} points.`
+      : "");
 
   return (
-    <div className={chartFrameClass}>
-      <ResponsiveContainer
-        debounce={50}
-        height="100%"
-        initialDimension={chartInitialDimension}
-        minHeight={360}
-        minWidth={0}
-        width="100%"
+    <figure
+      role="img"
+      aria-labelledby={titleId}
+      aria-describedby={summaryId}
+      className="min-w-0 space-y-2"
+    >
+      <figcaption className="sr-only">
+        <span id={titleId}>Equity history chart.</span>{" "}
+        <span id={summaryId}>{summary}</span>
+      </figcaption>
+      <div
+        aria-hidden="true"
+        className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-[var(--muted-strong)]"
       >
-        <LineChart data={data} margin={{ left: 8, right: 20, top: 20, bottom: 8 }}>
+        <span className="inline-flex items-center gap-2">
+          <span className="size-2 rounded-full bg-[#34d399]" />
+          Equity
+        </span>
+        <span>
+          {series.length} daily {series.length === 1 ? "close" : "closes"}
+        </span>
+      </div>
+      <ChartFrame>
+        <LineChart
+          data={data}
+          margin={{ left: 8, right: 20, top: 20, bottom: 8 }}
+        >
           <CartesianGrid stroke={gridStroke} strokeDasharray="3 3" />
           <XAxis dataKey="label" tick={axisStyle} minTickGap={42} />
           <YAxis
             tick={axisStyle}
-            tickFormatter={(value) => `$${Number(value).toLocaleString()}`}
+            tickFormatter={currencyTickFormatter}
             domain={yDomain}
             tickCount={5}
             width={86}
@@ -160,18 +254,25 @@ export function EquityChart({ rows }: { rows: AccountEquity[] }) {
             stroke={CHART_COLORS.profit}
             strokeWidth={2}
             dot={false}
+            isAnimationActive={false}
           />
         </LineChart>
-      </ResponsiveContainer>
-    </div>
+      </ChartFrame>
+    </figure>
   );
 }
 
 export function PnlBarChart({ rows }: { rows: StrategyDailyPnl[] }) {
+  const titleId = useId();
+  const summaryId = useId();
   const byDate = new Map<string, Record<string, string | number>>();
 
   for (const row of rows) {
-    if (row.daily_pnl === null || row.daily_pnl === undefined) {
+    if (
+      !row.date?.trim() ||
+      row.daily_pnl === null ||
+      row.daily_pnl === undefined
+    ) {
       continue;
     }
     const pnl = toNumber(row.daily_pnl);
@@ -192,40 +293,98 @@ export function PnlBarChart({ rows }: { rows: StrategyDailyPnl[] }) {
       }
       return cleaned;
     })
-    .filter((entry) => Object.keys(entry).length > 1);
+    .filter((entry) => Object.keys(entry).length > 1)
+    .sort(chronologicalLabel);
   const strategies = [
     ...new Set(
       nonZeroData.flatMap((entry) =>
         Object.keys(entry).filter((key) => key !== "date"),
       ),
     ),
-  ];
+  ].sort((left, right) =>
+    left.localeCompare(right, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }),
+  );
   const data = downsample(nonZeroData, 3000);
 
   if (data.length === 0 || strategies.length === 0) {
     return (
-      <div className="flex min-h-24 items-center justify-center rounded-md border border-dashed border-white/[0.1] px-4 text-center text-sm text-[var(--muted)]">
+      <ChartEmptyState>
         No non-zero daily P&amp;L in the selected range.
-      </div>
+      </ChartEmptyState>
     );
   }
 
+  const plottedValues = data.flatMap((entry) =>
+    strategies
+      .map((strategy) => toNumber(entry[strategy]))
+      .filter((value) => Math.abs(value) >= minimumVisiblePnl),
+  );
+  const netPnl = plottedValues.reduce((total, value) => total + value, 0);
+  const positiveObservations = plottedValues.filter((value) => value > 0).length;
+  const negativeObservations = plottedValues.filter((value) => value < 0).length;
+  const firstDate = String(data[0].date);
+  const lastDate = String(data.at(-1)?.date);
+  const summary =
+    `Daily strategy P&L from ${firstDate} to ${lastDate} across ${data.length} plotted trading dates and ${strategies.length} strategy families. Net plotted P&L is ${formatCurrency(netPnl)}, with ${positiveObservations} positive and ${negativeObservations} negative observations. Green bars are positive and pink bars are negative.` +
+    (data.length < nonZeroData.length
+      ? ` The visual chart is sampled from ${nonZeroData.length} trading dates.`
+      : "");
+
   return (
-    <div className={chartFrameClass}>
-      <ResponsiveContainer
-        debounce={50}
-        height="100%"
-        initialDimension={chartInitialDimension}
-        minHeight={360}
-        minWidth={0}
-        width="100%"
+    <figure
+      role="img"
+      aria-labelledby={titleId}
+      aria-describedby={summaryId}
+      className="min-w-0 space-y-2"
+    >
+      <figcaption className="sr-only">
+        <span id={titleId}>Daily strategy P&amp;L chart.</span>{" "}
+        <span id={summaryId}>{summary}</span>
+      </figcaption>
+      <div
+        aria-hidden="true"
+        className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-[var(--muted-strong)]"
       >
-        <BarChart data={data} margin={{ left: 8, right: 20, top: 20, bottom: 8 }}>
+        <span className="flex flex-wrap items-center gap-3">
+          <span className="inline-flex items-center gap-2">
+            <span className="size-2 rounded-sm bg-[#34d399]" />
+            Positive
+          </span>
+          <span className="inline-flex items-center gap-2">
+            <span className="size-2 rounded-sm bg-[#fb7185]" />
+            Negative
+          </span>
+        </span>
+        <span>
+          {strategies.length}{" "}
+          {strategies.length === 1 ? "strategy family" : "strategy families"}
+          {" · "}
+          <span
+            className={
+              netPnl < 0
+                ? "text-[#fb7185]"
+                : netPnl > 0
+                  ? "text-[#34d399]"
+                  : ""
+            }
+          >
+            Net {formatCurrency(netPnl)}
+          </span>
+        </span>
+      </div>
+      <ChartFrame>
+        <BarChart
+          data={data}
+          margin={{ left: 8, right: 20, top: 20, bottom: 8 }}
+        >
           <CartesianGrid stroke={gridStroke} strokeDasharray="3 3" />
           <XAxis dataKey="date" tick={axisStyle} minTickGap={30} />
           <YAxis
             tick={axisStyle}
-            tickFormatter={(value) => `$${Number(value).toLocaleString()}`}
+            tickFormatter={currencyTickFormatter}
             width={86}
           />
           <Tooltip
@@ -233,10 +392,15 @@ export function PnlBarChart({ rows }: { rows: StrategyDailyPnl[] }) {
             cursor={{ fill: "rgba(125, 211, 252, 0.055)" }}
           />
           {strategies.map((strategy) => (
-            <Bar key={strategy} dataKey={strategy} fill={CHART_COLORS.profit}>
+            <Bar
+              key={strategy}
+              dataKey={strategy}
+              fill={CHART_COLORS.profit}
+              isAnimationActive={false}
+            >
               {data.map((item, itemIndex) => (
                 <Cell
-                  key={`${strategy}-${itemIndex}`}
+                  key={strategy + "-" + itemIndex}
                   fill={
                     toNumber(item[strategy]) < 0
                       ? CHART_COLORS.loss
@@ -247,7 +411,7 @@ export function PnlBarChart({ rows }: { rows: StrategyDailyPnl[] }) {
             </Bar>
           ))}
         </BarChart>
-      </ResponsiveContainer>
-    </div>
+      </ChartFrame>
+    </figure>
   );
 }

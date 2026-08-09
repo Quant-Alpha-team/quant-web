@@ -17,7 +17,13 @@ export function StatusMessage({
       : "bg-white/[0.08] text-[var(--muted-strong)]";
 
   return (
-    <div className={`flex items-center gap-3 rounded-md px-4 py-3 shadow-[0_10px_28px_var(--shadow)] backdrop-blur-xl ${color}`}>
+    <div
+      role={tone === "error" ? "alert" : "status"}
+      aria-live={tone === "error" ? "assertive" : "polite"}
+      aria-atomic="true"
+      aria-busy={tone === "loading" ? "true" : undefined}
+      className={`flex items-center gap-3 rounded-md px-4 py-3 shadow-[0_10px_28px_var(--shadow)] backdrop-blur-xl ${color}`}
+    >
       <SignalIcon
         icon={Icon}
         tone={iconTone}

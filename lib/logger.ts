@@ -121,7 +121,7 @@ function loggerConfig() {
   config = {
     dir: isAbsolute(rawDir)
       ? rawDir
-      : join(/*turbopackIgnore: true*/ process.cwd(), rawDir),
+      : join(/* turbopackIgnore: true */ process.cwd(), rawDir),
     level: normalizeLevel(process.env.LOG_LEVEL),
     fileName: process.env.LOG_FILE?.trim() || defaultLogFile,
     retentionDays: retentionDays(),
@@ -154,35 +154,44 @@ function pruneOldLogs(dir: string, retainDays: number) {
   const cutoff = Date.now() - retainDays * 24 * 60 * 60 * 1000;
   const fileName = loggerConfig().fileName;
   const patterns = [archivedLogPattern(fileName), legacyArchivedLogPattern(fileName)];
-  for (const file of readdirSync(dir)) {
+  for (const file of readdirSync(/* turbopackIgnore: true */ dir)) {
     if (!patterns.some((pattern) => pattern.test(file))) {
       continue;
     }
 
-    const path = join(dir, file);
-    if (statSync(path).mtimeMs < cutoff) {
-      unlinkSync(path);
+    const path = join(/* turbopackIgnore: true */ dir, file);
+    if (statSync(/* turbopackIgnore: true */ path).mtimeMs < cutoff) {
+      unlinkSync(/* turbopackIgnore: true */ path);
     }
   }
 }
 
 function archivedLogPath(dir: string, fileName: string, date: string) {
-  const basePath = join(dir, `${fileName}.${date}`);
-  if (!existsSync(basePath)) {
+  const basePath = join(
+    /* turbopackIgnore: true */ dir,
+    `${fileName}.${date}`,
+  );
+  if (!existsSync(/* turbopackIgnore: true */ basePath)) {
     return basePath;
   }
 
   for (let index = 1; index < 1000; index += 1) {
-    const path = join(dir, `${fileName}.${date}-${index}`);
-    if (!existsSync(path)) {
+    const path = join(
+      /* turbopackIgnore: true */ dir,
+      `${fileName}.${date}-${index}`,
+    );
+    if (!existsSync(/* turbopackIgnore: true */ path)) {
       return path;
     }
   }
-  return join(dir, `${fileName}.${date}-${Date.now()}`);
+  return join(
+    /* turbopackIgnore: true */ dir,
+    `${fileName}.${date}-${Date.now()}`,
+  );
 }
 
 function fileLocalDate(path: string) {
-  return localDate(statSync(path).mtime);
+  return localDate(statSync(/* turbopackIgnore: true */ path).mtime);
 }
 
 function rotateLogFile(current = loggerConfig()) {
@@ -191,8 +200,11 @@ function rotateLogFile(current = loggerConfig()) {
   }
 
   const date = localDate();
-  const activePath = join(current.dir, current.fileName);
-  if (!logFileDate && existsSync(activePath)) {
+  const activePath = join(
+    /* turbopackIgnore: true */ current.dir,
+    current.fileName,
+  );
+  if (!logFileDate && existsSync(/* turbopackIgnore: true */ activePath)) {
     logFileDate = fileLocalDate(activePath);
   }
 
@@ -200,8 +212,15 @@ function rotateLogFile(current = loggerConfig()) {
     return;
   }
 
-  if (existsSync(activePath) && logFileDate && logFileDate !== date) {
-    renameSync(activePath, archivedLogPath(current.dir, current.fileName, logFileDate));
+  if (
+    existsSync(/* turbopackIgnore: true */ activePath) &&
+    logFileDate &&
+    logFileDate !== date
+  ) {
+    renameSync(
+      /* turbopackIgnore: true */ activePath,
+      archivedLogPath(current.dir, current.fileName, logFileDate),
+    );
   }
 
   logFileDate = date;
@@ -212,41 +231,40 @@ function rotateLogFile(current = loggerConfig()) {
   }
 }
 
-function callerSource() {
-  const stack = new Error().stack?.split("\n").slice(2) ?? [];
-  for (const line of stack) {
-    if (line.includes("/lib/logger.") || line.includes("\\lib\\logger.")) {
-      continue;
-    }
-
-    const match = line.match(/(?:\()?((?:file:\/\/)?[^()]+?):(\d+):\d+\)?$/);
-    if (match) {
-      return `${basename(match[1].replace(/^file:\/\//, ""))}:${match[2]}`;
-    }
-  }
-  return "unknown:0";
-}
-
-function loggerSource() {
+function stackSource(loggerFrame = false) {
   const stack = new Error().stack?.split("\n").slice(1) ?? [];
   for (const line of stack) {
-    if (!line.includes("/lib/logger.") && !line.includes("\\lib\\logger.")) {
+    const fromLogger =
+      line.includes("/lib/logger.") || line.includes("\\lib\\logger.");
+    if (fromLogger !== loggerFrame) {
       continue;
     }
-
     const match = line.match(/(?:\()?((?:file:\/\/)?[^()]+?):(\d+):\d+\)?$/);
     if (match) {
       return `${basename(match[1].replace(/^file:\/\//, ""))}:${match[2]}`;
     }
   }
-  return "logger.ts:0";
+  return loggerFrame ? "logger.ts:0" : "unknown:0";
 }
 
 function cleanFieldValue(value: unknown) {
   if (value === null || value === undefined || value === "") {
     return "-";
   }
-  return String(value).replace(/\s+/g, " ").trim();
+  let text: string;
+  if (typeof value === "object") {
+    try {
+      text = JSON.stringify(value);
+    } catch {
+      text = String(value);
+    }
+  } else {
+    text = String(value);
+  }
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return normalized.length > 4000
+    ? `${normalized.slice(0, 3999)}…`
+    : normalized;
 }
 
 function formatFields(fields?: LogFields) {
@@ -263,7 +281,7 @@ function formatLine(
   level: LogLevel,
   message: string,
   fields?: LogFields,
-  source = callerSource(),
+  source = stackSource(),
 ) {
   return `${localTimestamp()} | ${level} | [${source}] | ${message}${formatFields(
     fields,
@@ -293,7 +311,11 @@ function writeLine(level: LogLevel, line: string) {
     if (!logFilePath) {
       return;
     }
-    appendFileSync(logFilePath, `${line}\n`, "utf8");
+    appendFileSync(
+      /* turbopackIgnore: true */ logFilePath,
+      `${line}\n`,
+      "utf8",
+    );
   } catch (error) {
     fileLoggingEnabled = false;
     const message = error instanceof Error ? error.message : String(error);
@@ -311,7 +333,7 @@ function initializeLogger() {
 
   initialized = true;
   try {
-    mkdirSync(current.dir, { recursive: true });
+    mkdirSync(/* turbopackIgnore: true */ current.dir, { recursive: true });
     rotateLogFile(current);
   } catch (error) {
     fileLoggingEnabled = false;
@@ -335,7 +357,7 @@ function initializeLogger() {
         level: current.level,
         retain: `${current.retentionDays}d`,
       },
-      loggerSource(),
+      stackSource(true),
     ),
   );
   return current;

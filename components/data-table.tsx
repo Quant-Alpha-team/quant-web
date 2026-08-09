@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useId,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -19,6 +20,7 @@ export type TableColumn<T> = {
   label: string;
   render: (row: T) => React.ReactNode;
   align?: "left" | "right";
+  wrap?: boolean;
   width?: string;
   resizeMinWidth?: number;
   sticky?: "left";
@@ -39,7 +41,27 @@ type PaginationConfig = {
 };
 
 const pagerButtonClass =
-  "inline-flex h-9 min-w-9 items-center justify-center rounded-md bg-[linear-gradient(180deg,rgba(255,255,255,0.14),rgba(255,255,255,0.09))] px-3 text-sm font-semibold text-[var(--foreground)] shadow-[0_10px_20px_rgba(0,5,18,0.18)] transition hover:-translate-y-px hover:bg-white/[0.18] disabled:cursor-not-allowed disabled:bg-white/[0.05] disabled:text-[var(--muted)] disabled:shadow-none disabled:hover:translate-y-0";
+  "inline-flex h-11 min-w-11 items-center justify-center rounded-md bg-[linear-gradient(180deg,rgba(255,255,255,0.14),rgba(255,255,255,0.09))] px-3 text-sm font-semibold text-[var(--foreground)] shadow-[0_10px_20px_rgba(0,5,18,0.18)] transition hover:-translate-y-px hover:bg-white/[0.18] disabled:cursor-not-allowed disabled:bg-white/[0.05] disabled:text-[var(--muted)] disabled:shadow-none disabled:hover:translate-y-0";
+
+const defaultPageSizeOptions = [25, 50, 100];
+
+function validPageSize(value: number | undefined) {
+  return Number.isInteger(value) && Number(value) > 0;
+}
+
+function sortButtonLabel(
+  label: string,
+  isSorted: boolean,
+  direction: TableSort["direction"] | undefined,
+) {
+  if (!isSorted) {
+    return label + ": not sorted. Sort ascending.";
+  }
+  if (direction === "asc") {
+    return label + ": sorted ascending. Sort descending.";
+  }
+  return label + ": sorted descending. Clear sorting.";
+}
 
 export function DataTable<T>({
   rows,
@@ -53,15 +75,26 @@ export function DataTable<T>({
   minWidth?: string;
 }) {
   const paginationEnabled = pagination?.enabled ?? false;
-  const pageSizeOptions = pagination?.pageSizeOptions ?? [25, 50, 100];
-  const defaultPageSize = pagination?.pageSize ?? pageSizeOptions[0] ?? 25;
+  const configuredPageSizeOptions =
+    pagination?.pageSizeOptions?.filter(validPageSize) ?? defaultPageSizeOptions;
+  const configuredPageSize = validPageSize(pagination?.pageSize)
+    ? Number(pagination?.pageSize)
+    : (configuredPageSizeOptions[0] ?? defaultPageSizeOptions[0]);
+  const pageSizeOptions = Array.from(
+    new Set([configuredPageSize, ...configuredPageSizeOptions]),
+  );
+  const tableRegionId = useId();
+  const pageSizeSelectId = useId();
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(defaultPageSize);
+  const [selectedPageSize, setSelectedPageSize] = useState(configuredPageSize);
+  const pageSize = pageSizeOptions.includes(selectedPageSize)
+    ? selectedPageSize
+    : configuredPageSize;
   const [sort, setSort] = useState<TableSort | null>(null);
   const [columnWidths, setColumnWidths] = useState<Record<string, number> | null>(
     null,
   );
-  const [minimumTableWidth, setMinimumTableWidth] = useState<number | null>(null);
+  const minimumTableWidth = useRef<number | null>(null);
   const [resizingColumn, setResizingColumn] = useState<string | null>(null);
   const columnResize = useRef<{
     key: string;
@@ -71,9 +104,7 @@ export function DataTable<T>({
     minimumTableWidth: number;
     widths: Record<string, number>;
   } | null>(null);
-  const tableWidth = columnWidths
-    ? columns.reduce((total, column) => total + columnWidths[column.key], 0)
-    : null;
+  const tableWidth = columnWidths ? totalColumnWidth(columnWidths) : null;
 
   function columnMinimumWidth(column: TableColumn<T>) {
     return column.resizeMinWidth ?? 104;
@@ -154,7 +185,7 @@ export function DataTable<T>({
     const viewportWidth =
       resizeHandle.closest("table")?.parentElement?.clientWidth ?? 0;
     return Math.max(
-      minimumTableWidth ?? totalColumnWidth(widths),
+      minimumTableWidth.current ?? totalColumnWidth(widths),
       viewportWidth,
     );
   }
@@ -183,6 +214,20 @@ export function DataTable<T>({
     }, {});
   }
 
+  function prepareColumnResize(resizeHandle: HTMLButtonElement) {
+    const measuredWidths =
+      columnWidths ?? measureColumnWidths(resizeHandle);
+    if (!measuredWidths) {
+      return null;
+    }
+    const requiredWidth = resizeMinimumWidth(resizeHandle, measuredWidths);
+    minimumTableWidth.current = requiredWidth;
+    return {
+      requiredWidth,
+      widths: fillMinimumTableWidth(measuredWidths, requiredWidth),
+    };
+  }
+
   function startColumnResize(
     event: ReactPointerEvent<HTMLButtonElement>,
     column: TableColumn<T>,
@@ -191,16 +236,11 @@ export function DataTable<T>({
       return;
     }
 
-    const measuredWidths =
-      columnWidths ?? measureColumnWidths(event.currentTarget);
-    if (!measuredWidths) {
+    const prepared = prepareColumnResize(event.currentTarget);
+    if (!prepared) {
       return;
     }
-    const requiredWidth = resizeMinimumWidth(
-      event.currentTarget,
-      measuredWidths,
-    );
-    const widths = fillMinimumTableWidth(measuredWidths, requiredWidth);
+    const { requiredWidth, widths } = prepared;
 
     event.preventDefault();
     event.stopPropagation();
@@ -213,7 +253,6 @@ export function DataTable<T>({
       minimumTableWidth: requiredWidth,
       widths,
     };
-    setMinimumTableWidth(requiredWidth);
     setColumnWidths(widths);
     setResizingColumn(column.key);
   }
@@ -221,11 +260,6 @@ export function DataTable<T>({
   function moveColumnResize(event: ReactPointerEvent<HTMLButtonElement>) {
     const resize = columnResize.current;
     if (!resize || resize.pointerId !== event.pointerId) {
-      return;
-    }
-
-    const column = columns.find((candidate) => candidate.key === resize.key);
-    if (!column) {
       return;
     }
 
@@ -259,22 +293,16 @@ export function DataTable<T>({
       return;
     }
 
-    const measuredWidths =
-      columnWidths ?? measureColumnWidths(event.currentTarget);
-    if (!measuredWidths) {
+    const prepared = prepareColumnResize(event.currentTarget);
+    if (!prepared) {
       return;
     }
-    const requiredWidth = resizeMinimumWidth(
-      event.currentTarget,
-      measuredWidths,
-    );
-    const widths = fillMinimumTableWidth(measuredWidths, requiredWidth);
+    const { requiredWidth, widths } = prepared;
 
     event.preventDefault();
     event.stopPropagation();
     const delta =
       (event.shiftKey ? 40 : 12) * (event.key === "ArrowRight" ? 1 : -1);
-    setMinimumTableWidth(requiredWidth);
     setColumnWidths(
       constrainedColumnWidths(
         widths,
@@ -366,8 +394,12 @@ export function DataTable<T>({
     <div className="space-y-3">
       <div
         tabIndex={minWidth || columnWidths ? 0 : undefined}
+        role={minWidth || columnWidths ? "region" : undefined}
         aria-label={
-          minWidth || columnWidths ? "Horizontally scrollable data table" : undefined
+          minWidth || columnWidths ? "Scrollable data table" : undefined
+        }
+        aria-describedby={
+          minWidth || columnWidths ? tableRegionId + "-instructions" : undefined
         }
         className={
           (minWidth ? "overflow-x-scroll " : "overflow-x-auto ") +
@@ -375,6 +407,7 @@ export function DataTable<T>({
         }
       >
         <table
+          aria-label="Data table"
           style={
             tableWidth === null
               ? minWidth
@@ -407,6 +440,7 @@ export function DataTable<T>({
                 return (
                   <th
                     key={column.key}
+                    title={column.label}
                     data-table-column={column.key}
                     aria-sort={
                       column.sortValue
@@ -432,6 +466,11 @@ export function DataTable<T>({
                     {column.sortValue ? (
                       <button
                         type="button"
+                        aria-label={sortButtonLabel(
+                          column.label,
+                          isSorted,
+                          sort?.direction,
+                        )}
                         onClick={() => {
                           setSort((current) => {
                             if (current?.key !== column.key) {
@@ -481,31 +520,33 @@ export function DataTable<T>({
                     {columnIndex < columns.length - 1 ? (
                       <button
                         type="button"
-                        aria-label={`Resize ${column.label} column. Drag, or use the left and right arrow keys.`}
-                      title={`Resize ${column.label} column`}
-                      onPointerDown={(event) => startColumnResize(event, column)}
-                      onPointerMove={moveColumnResize}
-                      onPointerUp={finishColumnResize}
-                      onPointerCancel={finishColumnResize}
-                      onLostPointerCapture={(event) => {
-                        if (columnResize.current?.pointerId === event.pointerId) {
-                          columnResize.current = null;
-                          setResizingColumn(null);
+                        aria-label={
+                          "Resize " +
+                          column.label +
+                          " column. Drag, or use the left and right arrow keys."
                         }
-                      }}
-                      onKeyDown={(event) =>
-                        resizeColumnWithKeyboard(event, column)
-                      }
-                      className="group/resize absolute right-0 top-0 z-10 flex h-full w-2 cursor-col-resize touch-none select-none items-center justify-end focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-300"
-                    >
-                      <span
-                        className={
-                          "h-3/5 w-px transition-colors " +
-                          (resizingColumn === column.key
-                            ? "bg-cyan-300"
-                            : "bg-white/20 group-hover/resize:bg-cyan-300/80")
+                        title={"Resize " + column.label + " column"}
+                        onPointerDown={(event) =>
+                          startColumnResize(event, column)
                         }
-                      />
+                        onPointerMove={moveColumnResize}
+                        onPointerUp={finishColumnResize}
+                        onPointerCancel={finishColumnResize}
+                        onLostPointerCapture={finishColumnResize}
+                        onKeyDown={(event) =>
+                          resizeColumnWithKeyboard(event, column)
+                        }
+                        className="group/resize absolute right-0 top-0 z-10 flex h-full w-2 cursor-col-resize touch-none select-none items-center justify-end focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-300"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={
+                            "h-3/5 w-px transition-colors " +
+                            (resizingColumn === column.key
+                              ? "bg-cyan-300"
+                              : "bg-white/20 group-hover/resize:bg-cyan-300/80")
+                          }
+                        />
                       </button>
                     ) : null}
                   </th>
@@ -534,7 +575,14 @@ export function DataTable<T>({
                         : ""
                     }`}
                   >
-                    <div className="min-w-0 overflow-hidden text-ellipsis">
+                    <div
+                      className={
+                        "min-w-0 " +
+                        (column.wrap
+                          ? "whitespace-normal break-words [overflow-wrap:anywhere]"
+                          : "overflow-hidden text-ellipsis whitespace-nowrap")
+                      }
+                    >
                       {column.render(row)}
                     </div>
                   </td>
@@ -543,24 +591,40 @@ export function DataTable<T>({
             ))}
           </tbody>
         </table>
+        {minWidth || columnWidths ? (
+          <span id={tableRegionId + "-instructions"} className="sr-only">
+            Scroll horizontally to view additional columns.
+          </span>
+        ) : null}
       </div>
 
       {paginationEnabled && totalRows > 0 ? (
-        <div className="flex flex-col gap-3 rounded-md bg-white/[0.05] px-3 py-3 text-xs text-[var(--muted)] shadow-[0_12px_30px_rgba(0,5,18,0.16)] backdrop-blur xl:flex-row xl:items-center xl:justify-between">
-          <div className="font-mono uppercase tracking-normal">
+        <nav
+          aria-label="Table pagination"
+          className="flex flex-col gap-3 rounded-md bg-white/[0.05] px-3 py-3 text-xs text-[var(--muted)] shadow-[0_12px_30px_rgba(0,5,18,0.16)] backdrop-blur xl:flex-row xl:items-center xl:justify-between"
+        >
+          <div
+            role="status"
+            aria-live="polite"
+            className="font-mono uppercase tracking-normal"
+          >
             Showing {startIndex + 1}-{endIndex} of {totalRows}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-2 rounded-md bg-white/[0.05] px-2.5 py-1.5 text-[11px] uppercase tracking-normal text-[var(--muted-strong)]">
-              Rows
+            <label
+              htmlFor={pageSizeSelectId}
+              className="flex min-h-11 items-center gap-2 rounded-md bg-white/[0.05] px-2.5 py-1.5 text-[11px] uppercase tracking-normal text-[var(--muted-strong)]"
+            >
+              Rows per page
               <select
+                id={pageSizeSelectId}
                 value={pageSize}
                 onChange={(event) => {
-                  setPageSize(Number(event.target.value));
+                  setSelectedPageSize(Number(event.target.value));
                   setPage(1);
                 }}
-                className="h-7 rounded-md bg-white/[0.08] px-2 text-xs text-[var(--foreground)] outline-none"
+                className="h-8 rounded-md bg-white/[0.08] px-2 text-xs text-[var(--foreground)] outline-none"
               >
                 {pageSizeOptions.map((option) => (
                   <option key={option} value={option}>
@@ -573,34 +637,47 @@ export function DataTable<T>({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() =>
-                  setPage((current) => Math.max(1, Math.min(currentPage, current) - 1))
+                aria-label={
+                  "Previous page. Current page " +
+                  currentPage +
+                  " of " +
+                  totalPages +
+                  "."
                 }
+                title="Previous page"
+                onClick={() => setPage(Math.max(1, currentPage - 1))}
                 disabled={currentPage <= 1}
                 className={pagerButtonClass}
               >
-                <ChevronLeft className="h-4 w-4" />
+                <ChevronLeft className="h-4 w-4" aria-hidden="true" />
               </button>
 
-              <span className="rounded-md bg-white/[0.05] px-3 py-2 font-mono text-[11px] uppercase tracking-normal text-[var(--muted-strong)]">
+              <span
+                aria-current="page"
+                className="rounded-md bg-white/[0.05] px-3 py-2 font-mono text-[11px] uppercase tracking-normal text-[var(--muted-strong)]"
+              >
                 Page {currentPage} / {totalPages}
               </span>
 
               <button
                 type="button"
-                onClick={() =>
-                  setPage((current) =>
-                    Math.min(totalPages, Math.max(currentPage, current) + 1),
-                  )
+                aria-label={
+                  "Next page. Current page " +
+                  currentPage +
+                  " of " +
+                  totalPages +
+                  "."
                 }
+                title="Next page"
+                onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
                 disabled={currentPage >= totalPages}
                 className={pagerButtonClass}
               >
-                <ChevronRight className="h-4 w-4" />
+                <ChevronRight className="h-4 w-4" aria-hidden="true" />
               </button>
             </div>
           </div>
-        </div>
+        </nav>
       ) : null}
     </div>
   );
