@@ -24,19 +24,15 @@ RUN --mount=type=cache,id=quant-web-npm,target=/root/.npm \
 # ==========================================
 # Stage 2: Builder (Standalone Output)
 # ==========================================
-FROM node:22-alpine AS builder
+FROM deps AS builder
 
-ENV NEXT_TELEMETRY_DISABLED=1
-
-WORKDIR /app
-
-# Keep the build image compatible with native packages such as sharp/swc
-RUN apk add --no-cache libc6-compat
-
-# Copy dependencies and source, then build the optimized Next.js bundle
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-RUN mkdir -p public && npm run build
+# Copy only the files required by the production build
+COPY tsconfig.json next.config.mjs postcss.config.mjs ./
+COPY app ./app
+COPY components ./components
+COPY lib ./lib
+COPY public ./public
+RUN npm run build
 
 # ==========================================
 # Stage 3: Runtime (Slim Execution)
@@ -60,6 +56,7 @@ RUN apk add --no-cache libc6-compat \
 # [OPTIMIZATION] Copy only traced standalone output instead of full node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 # Run as non-root in production
 USER nextjs

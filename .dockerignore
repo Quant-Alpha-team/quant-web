@@ -1,19 +1,34 @@
-.git
-.next
-node_modules
-coverage
-out
-build
+# Deny by default so local files never enter the remote build context.
+**
 
-.env
-.env.*
-!.env.example
+# Dependency manifests
+!package.json
+!package-lock.json
 
-.DS_Store
-*.pem
-*.tsbuildinfo
+# Production build configuration
+!tsconfig.json
+!next.config.mjs
+!postcss.config.mjs
 
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
+# Application source and public assets
+!app/
+!app/**
+!components/
+!components/**
+!lib/
+!lib/**
+!public/
+!public/**
+
+# Never re-include secrets accidentally placed under an allowed directory.
+**/.env
+**/.env.*
+**/.npmrc
+**/.netrc
+**/*.pem
+**/*.key
+**/*.crt
+**/*.p12
+**/*.pfx
+**/*.jks
+**/*.keystore
