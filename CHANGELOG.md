@@ -1,3 +1,9 @@
+## v1.0.2 (2026-08-09)
+
+### Fix
+
+- **dashboard**: harden data loading and streamline dashboard UI
+
 ## v1.0.1 (2026-08-08)
 
 ### Fix
