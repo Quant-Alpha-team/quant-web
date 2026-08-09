@@ -1,3 +1,16 @@
+## v1.0.3 (2026-08-09)
+
+### Fix
+
+- **docker**: restrict image inputs and restore public assets
+
+### Refactor
+
+- **dashboard**: consolidate display and export schemas
+- **data**: align dashboard proxy with current backend contract
+- **logging**: share logger between server and CLI
+- **remove-stale-release-and-lint-overrides**: - remove the obsolete build.sh version target from Commitizen - rely on eslint-config-next for its built-in generated-file ignores
+
 ## v1.0.2 (2026-08-09)
 
 ### Fix
