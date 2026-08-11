@@ -411,9 +411,9 @@ export function DataTable<T>({
           style={
             tableWidth === null
               ? minWidth
-                ? { minWidth }
+                ? { width: "100%", minWidth }
                 : undefined
-              : { width: `${tableWidth}px`, minWidth: `${tableWidth}px` }
+              : { width: "100%", minWidth: `${tableWidth}px` }
           }
           className={
             (columnWidths ? "" : "min-w-full ") +
