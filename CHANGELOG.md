@@ -1,3 +1,9 @@
+## v1.1.1 (2026-08-11)
+
+### Fix
+
+- **dashboard**: adjust the blank part
+
 ## v1.1.0 (2026-08-09)
 
 ### Feat

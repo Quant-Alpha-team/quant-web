@@ -285,4 +285,4 @@ Release history is maintained in [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 
-**Version**: 1.1.0
+**Version**: 1.1.1
