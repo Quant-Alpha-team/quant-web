@@ -9,6 +9,10 @@ import type {
   TradeExecution,
 } from "@/lib/types";
 import { logError, logWarning } from "@/lib/logger";
+import {
+  normalizeReconciliationSyncResult,
+  type ReconciliationSyncResult,
+} from "./reconciliation";
 
 type ApiEnvelope<T> = {
   ok: boolean;
@@ -695,12 +699,6 @@ export async function getFilters(): Promise<FilterOptions> {
   };
 }
 
-export type ReconciliationSyncResult = {
-  status: "completed";
-  completed_at: string;
-  elapsed_seconds: number;
-};
-
 export async function syncTradingData(): Promise<ReconciliationSyncResult> {
   const payload = await requestJson<unknown>(
     "/api/trading/reconciliation/sync/",
@@ -710,32 +708,14 @@ export async function syncTradingData(): Promise<ReconciliationSyncResult> {
     },
   );
   const data = payload.data;
-  if (!isRecord(data)) {
+  try {
+    return normalizeReconciliationSyncResult(data);
+  } catch (error) {
     throw new BackendApiError(
-      "Unexpected response format from sync API.",
+      `Unexpected synchronization result: ${error instanceof Error ? error.message : String(error)}`,
       "Backend returned an invalid synchronization result.",
     );
   }
-  const completedAt =
-    typeof data.completed_at === "string" ? data.completed_at.trim() : "";
-  const elapsedSeconds = finiteNumber(data.elapsed_seconds);
-  if (
-    data.status !== "completed" ||
-    !completedAt ||
-    !Number.isFinite(Date.parse(completedAt)) ||
-    elapsedSeconds === undefined ||
-    elapsedSeconds < 0
-  ) {
-    throw new BackendApiError(
-      "Unexpected response fields from sync API.",
-      "Backend returned an invalid synchronization result.",
-    );
-  }
-  return {
-    status: "completed",
-    completed_at: completedAt,
-    elapsed_seconds: elapsedSeconds,
-  };
 }
 
 export function getTradeExecutions(params: ScopedDateRangeParams) {

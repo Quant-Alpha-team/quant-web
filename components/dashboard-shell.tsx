@@ -43,6 +43,7 @@ import {
   toOptionalNumber,
   todayInTimeZone,
 } from "@/lib/dashboard";
+import type { ReconciliationSyncResult } from "@/lib/reconciliation";
 import type {
   AccountEquity,
   DashboardData,
@@ -81,12 +82,6 @@ type HealthState = {
   error: string | null;
 };
 
-type ReconciliationResult = {
-  status: "completed";
-  completed_at: string;
-  elapsed_seconds: number;
-};
-
 function selectionLabel(values: string[], allLabel: string) {
   if (values.includes("ALL")) {
     return allLabel;
@@ -112,6 +107,7 @@ const operationalStatusVisuals = {
   loading: { className: "text-cyan-200", tone: "cyan" },
   pending: { className: "text-cyan-200", tone: "cyan" },
   complete: { className: "text-emerald-200", tone: "green" },
+  warning: { className: "text-amber-200", tone: "amber" },
   running: { className: "text-cyan-200", tone: "cyan" },
   "not run": { className: "text-[var(--muted-strong)]", tone: "amber" },
 } as const;
@@ -1751,7 +1747,8 @@ export function DashboardShell() {
   const [filterError, setFilterError] = useState<string | null>(null);
   const [dataError, setDataError] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
-  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [lastSyncResult, setLastSyncResult] =
+    useState<ReconciliationSyncResult | null>(null);
   const [health, setHealth] = useState<HealthState>({
     status: "checking",
     checkedAt: null,
@@ -2057,8 +2054,8 @@ export function DashboardShell() {
         method: "POST",
         cache: "no-store",
       });
-      const result = await readApi<ReconciliationResult>(response);
-      setLastSyncAt(result.completed_at);
+      const result = await readApi<ReconciliationSyncResult>(response);
+      setLastSyncResult(result);
       setLoadedQueryKey(null);
       setRefreshKey((value) => value + 1);
       setHealthRefreshKey((value) => value + 1);
@@ -2157,7 +2154,15 @@ export function DashboardShell() {
           ? "partial"
           : "current"
         : "pending";
-  const syncStatus = syncing ? "running" : syncError ? "failed" : lastSyncAt ? "complete" : "not run";
+  const syncStatus = syncing
+    ? "running"
+    : syncError
+      ? "failed"
+      : lastSyncResult?.status === "completed_with_warnings"
+        ? "warning"
+        : lastSyncResult
+          ? "complete"
+          : "not run";
   const operationalStatuses = [
     { label: "Query", status: queryStatus, icon: RadioTower },
     { label: "Reconciliation", status: syncStatus, icon: ShieldCheck },
@@ -2289,7 +2294,7 @@ export function DashboardShell() {
                   Query completed: {formatTimestamp(currentData?.meta.completedAt, timezone)}
                 </div>
                 <div>
-                  Reconciliation: {lastSyncAt ? formatTimestamp(lastSyncAt, timezone) : "Not run this session"}
+                  Reconciliation: {lastSyncResult ? formatTimestamp(lastSyncResult.completed_at, timezone) : "Not run this session"}
                 </div>
               </div>
             </div>
@@ -2313,6 +2318,15 @@ export function DashboardShell() {
           {syncError ? (
             <StatusMessage tone="error">
               Trading data sync failed: {syncError}
+            </StatusMessage>
+          ) : null}
+          {!syncing &&
+          !syncError &&
+          lastSyncResult?.status === "completed_with_warnings" ? (
+            <StatusMessage tone="info">
+              Reconciliation completed with warnings: {lastSyncResult.warnings.length
+                ? lastSyncResult.warnings.join(" ")
+                : "one or more phases reported a warning."}
             </StatusMessage>
           ) : null}
           {syncing ? (
