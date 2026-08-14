@@ -6,7 +6,7 @@ set -euo pipefail
 IMAGE_NAME="quant-web"
 BUILDER_NAME="web-builder"
 REGISTRY_GH="${REGISTRY_GH:-ghcr.io/quant-alpha-team/registry}"
-REGISTRY_GL="${REGISTRY_GL:-registry.gitlab.com/quant-alpha-team/registry}"
+# REGISTRY_GL="${REGISTRY_GL:-registry.gitlab.com/quant-alpha-team/registry}"
 
 MODE="local"
 MODE_SET=""
@@ -152,7 +152,7 @@ fi
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION=$(read_version "$REPO_ROOT")
 LOCAL_TAG="${IMAGE_NAME}:${VERSION}"
-GL_TAG="${REGISTRY_GL}/${IMAGE_NAME}:${VERSION}"
+# GL_TAG="${REGISTRY_GL}/${IMAGE_NAME}:${VERSION}"
 GH_TAG="${REGISTRY_GH}/${IMAGE_NAME}:${VERSION}"
 
 trap cleanup_builder EXIT
@@ -173,13 +173,13 @@ echo "Platform: $BUILD_PLATFORM"
 ensure_builder
 
 if [[ "$MODE" == "remote" ]]; then
+  #   -t "$GL_TAG" \
   docker buildx build \
     --platform "$BUILD_PLATFORM" \
     --no-cache \
-    -t "$GL_TAG" \
     -t "$GH_TAG" \
     --push .
-  BUILT_TAGS+=("$GL_TAG")
+  # BUILT_TAGS+=("$GL_TAG")
   BUILT_TAGS+=("$GH_TAG")
 else
   if [[ -n "$(docker images -q "$LOCAL_TAG" 2>/dev/null || true)" ]]; then
