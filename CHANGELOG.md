@@ -1,3 +1,13 @@
+## v1.2.0 (2026-08-15)
+
+### Feat
+
+- **dashboard**: add Cash and Positions Value part
+
+### Fix
+
+- **build**: remove gitlab link first
+
 ## v1.1.2 (2026-08-12)
 
 ### Fix
