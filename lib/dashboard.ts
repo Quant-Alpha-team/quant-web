@@ -163,6 +163,22 @@ function newestValue(values: Array<string | undefined>) {
   return newest;
 }
 
+type AccountEquityValueField =
+  | "equity_value"
+  | "cash_value"
+  | "gross_position_value";
+
+function sumCompleteAccountMetric(
+  rows: AccountEquity[],
+  field: AccountEquityValueField,
+) {
+  const values = rows.map((row) => toOptionalNumber(row[field]));
+  if (values.length === 0 || values.some((value) => value === null)) {
+    return null;
+  }
+  return values.reduce<number>((total, value) => total + (value ?? 0), 0);
+}
+
 /**
  * Return one closing NAV point per account and trading date. If multiple
  * accounts are selected, carry each account's last known close forward and do
@@ -219,9 +235,11 @@ export function aggregateEquityHistory(rows: AccountEquity[]) {
         accounts.size === 1
           ? currentRows[0]?.broker_account_id
           : "ALL",
-      equity_value: currentRows.reduce(
-        (total, row) => total + (toOptionalNumber(row.equity_value) ?? 0),
-        0,
+      equity_value: sumCompleteAccountMetric(currentRows, "equity_value") ?? 0,
+      cash_value: sumCompleteAccountMetric(currentRows, "cash_value"),
+      gross_position_value: sumCompleteAccountMetric(
+        currentRows,
+        "gross_position_value",
       ),
     });
   }
@@ -237,6 +255,8 @@ export function computeKpis(
 ) {
   const kpi = {
     accountNav: null as number | null,
+    accountCash: null as number | null,
+    accountGrossPositionValue: null as number | null,
     navChange: null as number | null,
     navChangePercent: null as number | null,
     openPnl: null as number | null,
@@ -270,9 +290,14 @@ export function computeKpis(
   }
   const latestEquityRows = [...latestEquityByAccount.values()];
   if (latestEquityRows.length > 0) {
-    kpi.accountNav = latestEquityRows.reduce(
-      (total, row) => total + toNumber(row.equity_value),
-      0,
+    kpi.accountNav = sumCompleteAccountMetric(
+      latestEquityRows,
+      "equity_value",
+    );
+    kpi.accountCash = sumCompleteAccountMetric(latestEquityRows, "cash_value");
+    kpi.accountGrossPositionValue = sumCompleteAccountMetric(
+      latestEquityRows,
+      "gross_position_value",
     );
   }
 

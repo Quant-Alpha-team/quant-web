@@ -68,11 +68,15 @@ test("equity aggregation ignores invalid NAV rows and keeps the latest valid clo
       date: "2026-08-01",
       timestamp: "2026-08-01T21:00:00Z",
       equity_value: 125,
+      cash_value: 25,
+      gross_position_value: 100,
     },
   ]);
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].equity_value, 125);
+  assert.equal(rows[0].cash_value, 25);
+  assert.equal(rows[0].gross_position_value, 100);
 });
 
 test("KPI and equity chart aggregation choose the same row on timestamp ties", () => {
@@ -82,17 +86,54 @@ test("KPI and equity chart aggregation choose the same row on timestamp ties", (
       date: "2026-08-01",
       timestamp: "2026-08-01T20:00:00Z",
       equity_value: 100,
+      cash_value: 20,
+      gross_position_value: 80,
     },
     {
       broker_account_id: "A1",
       date: "2026-08-01",
       timestamp: "2026-08-01T20:00:00Z",
       equity_value: 125,
+      cash_value: 25,
+      gross_position_value: 100,
     },
   ];
 
   assert.equal(aggregateEquityHistory(rows)[0].equity_value, 125);
   assert.equal(computeKpis(rows, [], [], []).accountNav, 125);
+  assert.equal(computeKpis(rows, [], [], []).accountCash, 25);
+  assert.equal(computeKpis(rows, [], [], []).accountGrossPositionValue, 100);
+});
+
+test("account metrics require complete coverage before summing accounts", () => {
+  const rows = [
+    {
+      broker_account_id: "A1",
+      date: "2026-08-01",
+      timestamp: "2026-08-01T20:00:00Z",
+      equity_value: 100,
+      cash_value: 20,
+      gross_position_value: 80,
+    },
+    {
+      broker_account_id: "A2",
+      date: "2026-08-01",
+      timestamp: "2026-08-01T20:00:00Z",
+      equity_value: 200,
+      cash_value: 30,
+      gross_position_value: null,
+    },
+  ];
+
+  const aggregated = aggregateEquityHistory(rows)[0];
+  assert.equal(aggregated.equity_value, 300);
+  assert.equal(aggregated.cash_value, 50);
+  assert.equal(aggregated.gross_position_value, null);
+
+  const kpi = computeKpis(rows, [], [], []);
+  assert.equal(kpi.accountNav, 300);
+  assert.equal(kpi.accountCash, 50);
+  assert.equal(kpi.accountGrossPositionValue, null);
 });
 
 test("downsample keeps both endpoints", () => {

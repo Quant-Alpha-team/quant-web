@@ -531,6 +531,8 @@ const normalizeAccountEquity = rowNormalizer<AccountEquity>({
   timestamp: "string",
   broker_account_id: "string",
   equity_value: "number",
+  cash_value: "number?",
+  gross_position_value: "number?",
 });
 
 const normalizeStrategyDailyPnl = rowNormalizer<StrategyDailyPnl>({

@@ -444,8 +444,13 @@ function OverviewPanel({
   const pnlComplete = pnlAvailable && pnl.complete && !pnl.truncated;
   const positionsComplete =
     positionsAvailable && positions.complete && !positions.truncated;
+  const accountHistoryComplete = equity.complete && !equity.truncated;
   const currentEquityValue =
-    equity.complete && !equity.truncated ? kpi.accountNav : null;
+    accountHistoryComplete ? kpi.accountNav : null;
+  const currentPositionsValue = accountHistoryComplete
+    ? kpi.accountGrossPositionValue
+    : null;
+  const currentCashValue = accountHistoryComplete ? kpi.accountCash : null;
   const currentEquityAvailable = currentEquityValue !== null;
   const realizedValueCount = data.pnlRows.filter(
     (row) => toOptionalNumber(row.realized_pnl) !== null,
@@ -475,6 +480,24 @@ function OverviewPanel({
       : kpi.navChange === null || kpi.navChangePercent === null
       ? "One NAV close in selected range"
       : `${formatSignedCurrency(kpi.navChange)} (${formatSignedPercent(kpi.navChangePercent)})`;
+  const accountMetricDetail = (value: number | null, label: string) => {
+    let detail: string;
+    if (!equityAvailable) {
+      detail = "Account equity data unavailable";
+    } else if (!accountHistoryComplete) {
+      detail = "Latest " + label + " is not guaranteed";
+    } else if (data.perfRows.length === 0) {
+      detail = "No " + label + " snapshot in selected range";
+    } else if (value === null) {
+      detail = label + " is unavailable in the latest account snapshot";
+    } else {
+      detail = "Current account-wide broker value";
+    }
+    return datasetDetail(
+      detail + " · Not affected by strategy filters",
+      equity,
+    );
+  };
   const tradedFamilies = new Set(
     data.execRows.map((row) => strategyFamily(row)),
   ).size;
@@ -505,7 +528,7 @@ function OverviewPanel({
   const unrealizedValue = positionsComplete ? kpi.openPnl : null;
   const overviewMetrics = [
     {
-      label: "Account-wide Current Equity",
+      label: "Account Current Equity",
       value: currentEquityAvailable
         ? formatCurrency(currentEquityValue)
         : "Unavailable",
@@ -521,6 +544,24 @@ function OverviewPanel({
         ? metricTone(kpi.navChange)
         : "neutral",
       iconTone: "cyan",
+    },
+    {
+      label: "Positions Value",
+      value:
+        currentPositionsValue === null
+          ? "Unavailable"
+          : formatCurrency(currentPositionsValue),
+      delta: accountMetricDetail(currentPositionsValue, "positions value"),
+      iconTone: "violet",
+    },
+    {
+      label: "Cash",
+      value:
+        currentCashValue === null
+          ? "Unavailable"
+          : formatCurrency(currentCashValue),
+      delta: accountMetricDetail(currentCashValue, "cash"),
+      iconTone: "mint",
     },
     {
       label: "Total Realized P&L",
@@ -550,6 +591,11 @@ function OverviewPanel({
       tone: metricTone(unrealizedValue),
     },
     {
+      label: "Total Commission",
+      value: commissionValue === null ? "Unavailable" : formatCurrency(commissionValue),
+      delta: datasetDetail(commissionDetail, executions),
+    },
+    {
       label: "Total Trades",
       value: !executionsAvailable
         ? "Unavailable"
@@ -566,18 +612,16 @@ function OverviewPanel({
         positions,
       ),
     },
-    {
-      label: "Total Commission",
-      value: commissionValue === null ? "Unavailable" : formatCurrency(commissionValue),
-      delta: datasetDetail(commissionDetail, executions),
-    },
   ] satisfies Array<Parameters<typeof MetricCard>[0]>;
 
   return (
     <Panel title={`Portfolio Overview: ${strategyScope} (${accountId})`}>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-        {overviewMetrics.map((metric) => (
-          <div key={metric.label} className="lg:col-span-2">
+        {overviewMetrics.map((metric, index) => (
+          <div
+            key={metric.label}
+            className={index >= 6 ? "lg:col-span-3" : "lg:col-span-2"}
+          >
             <MetricCard {...metric} />
           </div>
         ))}
@@ -1334,15 +1378,24 @@ function EquitySummaryCard({
   detail,
   valueClassName = "text-[var(--foreground)]",
   detailClassName = "text-[var(--muted)]",
+  className = "",
 }: {
   label: string;
   value: ReactNode;
   detail: ReactNode;
   valueClassName?: string;
   detailClassName?: string;
+  className?: string;
 }) {
   return (
-    <div className="rounded-md bg-[linear-gradient(180deg,rgba(255,255,255,0.095),rgba(255,255,255,0.055))] px-4 py-3 shadow-[0_14px_32px_var(--shadow)]">
+    <div
+      className={[
+        "rounded-md bg-[linear-gradient(180deg,rgba(255,255,255,0.095),rgba(255,255,255,0.055))] px-4 py-3 shadow-[0_14px_32px_var(--shadow)]",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <div className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
         {label}
       </div>
@@ -1398,6 +1451,10 @@ function AccountEquityPanel({
   const first = dailyRows[0];
   const latestEquity = toNumber(latest?.equity_value);
   const firstEquity = toNumber(first?.equity_value);
+  const latestPositionsValue = toOptionalNumber(
+    latest?.gross_position_value,
+  );
+  const latestCashValue = toOptionalNumber(latest?.cash_value);
   const periodChange = dailyRows.length > 1 ? latestEquity - firstEquity : null;
   const periodChangePercent =
     periodChange === null || firstEquity === 0
@@ -1407,6 +1464,12 @@ function AccountEquityPanel({
     rows.map((row) => row.broker_account_id).filter(Boolean),
   ).size;
   const historyComplete = metadata.complete && !metadata.truncated;
+  const latestSnapshotDetail = [
+    accountCount,
+    accountCount === 1 ? "account" : "accounts",
+    "· Updated",
+    equitySnapshotTime(latest?.timestamp, timezone),
+  ].join(" ");
 
   const columns: DashboardColumn<EquityHistoryRow>[] = [
     valueColumn<EquityHistoryRow>(
@@ -1488,24 +1551,53 @@ function AccountEquityPanel({
   return (
     <Panel
       title="Account-wide Equity History"
-      helpText="Account NAV is broker-account data and is not narrowed by the strategy family or version filters."
+      helpText="Account values are broker-account data and are not narrowed by the strategy family or version filters."
     >
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-6">
         <EquitySummaryCard
+          className="md:col-span-2"
           label="Latest Net Liquid"
           value={historyComplete ? formatCurrency(latestEquity) : "Unavailable"}
           detail={
-            historyComplete ? (
-              <>
-                {accountCount} {accountCount === 1 ? "account" : "accounts"} · Updated{" "}
-                {equitySnapshotTime(latest?.timestamp, timezone)}
-              </>
-            ) : (
-              "Latest close is not guaranteed because the history is incomplete"
-            )
+            historyComplete
+              ? latestSnapshotDetail
+              : "Latest close is not guaranteed because the history is incomplete"
           }
         />
         <EquitySummaryCard
+          className="md:col-span-2"
+          label="Positions Value"
+          value={
+            historyComplete && latestPositionsValue !== null
+              ? formatCurrency(latestPositionsValue)
+              : "Unavailable"
+          }
+          detail={
+            !historyComplete
+              ? "Latest close is not guaranteed because the history is incomplete"
+              : latestPositionsValue === null
+                ? "Unavailable in the latest account snapshot"
+                : latestSnapshotDetail
+          }
+        />
+        <EquitySummaryCard
+          className="md:col-span-2"
+          label="Cash"
+          value={
+            historyComplete && latestCashValue !== null
+              ? formatCurrency(latestCashValue)
+              : "Unavailable"
+          }
+          detail={
+            !historyComplete
+              ? "Latest close is not guaranteed because the history is incomplete"
+              : latestCashValue === null
+                ? "Unavailable in the latest account snapshot"
+                : latestSnapshotDetail
+          }
+        />
+        <EquitySummaryCard
+          className="md:col-span-3"
           label="Change in Range"
           value={
             !historyComplete
@@ -1529,6 +1621,7 @@ function AccountEquityPanel({
           )}
         />
         <EquitySummaryCard
+          className="md:col-span-3"
           label="Daily Closes"
           value={
             <>

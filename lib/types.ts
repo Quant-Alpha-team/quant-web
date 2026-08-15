@@ -58,6 +58,8 @@ export type AccountEquity = {
   timestamp?: string;
   broker_account_id?: string;
   equity_value?: number | string;
+  cash_value?: number | string | null;
+  gross_position_value?: number | string | null;
 };
 
 export type StrategyDailyPnl = {
