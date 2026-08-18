@@ -44,6 +44,7 @@ import {
   todayInTimeZone,
 } from "@/lib/dashboard";
 import type { ReconciliationSyncResult } from "@/lib/reconciliation";
+import { TRADE_LOG_INSTRUMENT_COLUMNS } from "@/lib/trade-executions";
 import type {
   AccountEquity,
   DashboardData,
@@ -1700,8 +1701,9 @@ function TradeLogsPanel({
     }),
     ...strategyColumns<TradeExecution>("205px", "-", "-"),
     valueColumn<TradeExecution>("account", "Account ID", (row) => row.broker_account_id, dashCell),
-    valueColumn<TradeExecution>("symbol", "Symbol", (row) => row.symbol, dashCell),
-    valueColumn<TradeExecution>("type", "Type", (row) => row.sec_type, dashCell),
+    ...TRADE_LOG_INSTRUMENT_COLUMNS.map(({ key, label, field }) =>
+      valueColumn<TradeExecution>(key, label, (row) => row[field], dashCell),
+    ),
     valueColumn<TradeExecution>("side", "Side", (row) => row.side, dashCell),
     valueColumn<TradeExecution>("qty", "Qty", (row) => row.quantity, {
       align: "right",

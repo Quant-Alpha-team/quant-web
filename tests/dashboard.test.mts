@@ -11,6 +11,19 @@ import {
   todayInTimeZone,
   toOptionalNumber,
 } from "../lib/dashboard.ts";
+import {
+  TRADE_EXECUTION_ROW_SCHEMA,
+  TRADE_LOG_INSTRUMENT_COLUMNS,
+} from "../lib/trade-executions.ts";
+
+test("trade logs retain exchange data between symbol and type", () => {
+  assert.equal(TRADE_EXECUTION_ROW_SCHEMA.exchange, "string?");
+  assert.deepEqual(
+    TRADE_LOG_INSTRUMENT_COLUMNS.map(({ label }) => label),
+    ["Symbol", "Exchange", "Type"],
+  );
+  assert.equal(TRADE_LOG_INSTRUMENT_COLUMNS[1].field, "exchange");
+});
 
 test("numeric helpers preserve zero and distinguish missing values", () => {
   assert.equal(toOptionalNumber(0), 0);

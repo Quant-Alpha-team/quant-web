@@ -43,6 +43,7 @@ export type TradeExecution = {
   strategy_version?: string | null;
   broker_account_id?: string;
   symbol?: string;
+  exchange?: string;
   sec_type?: string;
   side?: string;
   quantity?: number | string;

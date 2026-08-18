@@ -9,6 +9,7 @@ import type {
   TradeExecution,
 } from "@/lib/types";
 import { logError, logWarning } from "@/lib/logger";
+import { TRADE_EXECUTION_ROW_SCHEMA } from "@/lib/trade-executions";
 import {
   normalizeReconciliationSyncResult,
   type ReconciliationSyncResult,
@@ -509,22 +510,9 @@ async function fetchAllPages<T>(
   return result(false, "Backend pagination safety limit was exceeded.");
 }
 
-const normalizeTradeExecution = rowNormalizer<TradeExecution>({
-  timestamp: "string",
-  strategy_name: "string",
-  strategy_family: "string",
-  broker_account_id: "string",
-  symbol: "string",
-  sec_type: "string",
-  side: "string",
-  status: "string",
-  strategy_version: "string?",
-  notes: "string?",
-  quantity: "number",
-  price: "number",
-  commission: "number?",
-  realized_pnl: "number?",
-});
+const normalizeTradeExecution = rowNormalizer<TradeExecution>(
+  TRADE_EXECUTION_ROW_SCHEMA,
+);
 
 const normalizeAccountEquity = rowNormalizer<AccountEquity>({
   date: "string",
