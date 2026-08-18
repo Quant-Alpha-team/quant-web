@@ -1,3 +1,9 @@
+## v1.2.1 (2026-08-18)
+
+### Fix
+
+- **dashboard**: add exchange part
+
 ## v1.2.0 (2026-08-15)
 
 ### Feat
