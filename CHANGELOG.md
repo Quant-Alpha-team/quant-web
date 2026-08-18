@@ -1,3 +1,9 @@
+## v1.2.2 (2026-08-18)
+
+### Fix
+
+- **exchange**: replace SMART to CBOE/NASDAQ etc
+
 ## v1.2.1 (2026-08-18)
 
 ### Fix
