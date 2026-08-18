@@ -44,6 +44,7 @@ export type TradeExecution = {
   broker_account_id?: string;
   symbol?: string;
   exchange?: string;
+  primary_exchange?: string;
   sec_type?: string;
   side?: string;
   quantity?: number | string;

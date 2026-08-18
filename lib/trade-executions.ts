@@ -9,6 +9,7 @@ export const TRADE_EXECUTION_ROW_SCHEMA = {
   broker_account_id: "string",
   symbol: "string",
   exchange: "string?",
+  primary_exchange: "string?",
   sec_type: "string",
   side: "string",
   status: "string",
@@ -20,12 +21,25 @@ export const TRADE_EXECUTION_ROW_SCHEMA = {
   realized_pnl: "number?",
 } as const satisfies Record<keyof TradeExecution, TradeExecutionFieldKind>;
 
+function actualExchange(value: string | undefined) {
+  const normalized = value?.trim().toUpperCase();
+  return normalized && normalized !== "SMART" && normalized !== "UNKNOWN"
+    ? normalized
+    : undefined;
+}
+
+export function tradeExecutionExchange(
+  row: Pick<TradeExecution, "exchange" | "primary_exchange">,
+) {
+  return actualExchange(row.exchange) ?? actualExchange(row.primary_exchange);
+}
+
 export const TRADE_LOG_INSTRUMENT_COLUMNS = [
-  { key: "symbol", label: "Symbol", field: "symbol" },
-  { key: "exchange", label: "Exchange", field: "exchange" },
-  { key: "type", label: "Type", field: "sec_type" },
+  { key: "symbol", label: "Symbol", read: (row: TradeExecution) => row.symbol },
+  { key: "exchange", label: "Exchange", read: tradeExecutionExchange },
+  { key: "type", label: "Type", read: (row: TradeExecution) => row.sec_type },
 ] as const satisfies readonly {
   key: string;
   label: string;
-  field: keyof TradeExecution;
+  read: (row: TradeExecution) => string | undefined;
 }[];

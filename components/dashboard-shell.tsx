@@ -1701,8 +1701,8 @@ function TradeLogsPanel({
     }),
     ...strategyColumns<TradeExecution>("205px", "-", "-"),
     valueColumn<TradeExecution>("account", "Account ID", (row) => row.broker_account_id, dashCell),
-    ...TRADE_LOG_INSTRUMENT_COLUMNS.map(({ key, label, field }) =>
-      valueColumn<TradeExecution>(key, label, (row) => row[field], dashCell),
+    ...TRADE_LOG_INSTRUMENT_COLUMNS.map(({ key, label, read }) =>
+      valueColumn<TradeExecution>(key, label, read, dashCell),
     ),
     valueColumn<TradeExecution>("side", "Side", (row) => row.side, dashCell),
     valueColumn<TradeExecution>("qty", "Qty", (row) => row.quantity, {

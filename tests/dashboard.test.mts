@@ -14,15 +14,47 @@ import {
 import {
   TRADE_EXECUTION_ROW_SCHEMA,
   TRADE_LOG_INSTRUMENT_COLUMNS,
+  tradeExecutionExchange,
 } from "../lib/trade-executions.ts";
 
 test("trade logs retain exchange data between symbol and type", () => {
   assert.equal(TRADE_EXECUTION_ROW_SCHEMA.exchange, "string?");
+  assert.equal(TRADE_EXECUTION_ROW_SCHEMA.primary_exchange, "string?");
   assert.deepEqual(
     TRADE_LOG_INSTRUMENT_COLUMNS.map(({ label }) => label),
     ["Symbol", "Exchange", "Type"],
   );
-  assert.equal(TRADE_LOG_INSTRUMENT_COLUMNS[1].field, "exchange");
+});
+
+test("trade logs prefer an actual exchange over SMART routing", () => {
+  assert.equal(
+    tradeExecutionExchange({ exchange: "SMART", primary_exchange: "CBOE" }),
+    "CBOE",
+  );
+  assert.equal(
+    TRADE_LOG_INSTRUMENT_COLUMNS[1].read({ exchange: "SMART", primary_exchange: "CBOE" }),
+    "CBOE",
+  );
+  assert.equal(
+    tradeExecutionExchange({ exchange: "ISLAND", primary_exchange: "NASDAQ" }),
+    "ISLAND",
+  );
+  assert.equal(
+    tradeExecutionExchange({ exchange: " ", primary_exchange: "ARCA" }),
+    "ARCA",
+  );
+  assert.equal(
+    tradeExecutionExchange({
+      exchange: "UNKNOWN",
+      primary_exchange: "NASDAQ",
+    }),
+    "NASDAQ",
+  );
+  assert.equal(tradeExecutionExchange({}), undefined);
+  assert.equal(
+    tradeExecutionExchange({ exchange: "SMART", primary_exchange: "UNKNOWN" }),
+    undefined,
+  );
 });
 
 test("numeric helpers preserve zero and distinguish missing values", () => {
