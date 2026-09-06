@@ -4,11 +4,27 @@ Next.js dashboard for monitoring the Quant Alpha trading platform. It combines
 strategy performance, account equity, broker positions, and execution records
 behind a single filterable interface.
 
+For backend setup, authentication, API, reconciliation, and deployment details,
+see the [Quant Alpha Backend README](https://github.com/quant-alpha-team/quant-backend/blob/main/README.md).
+
 > [!IMPORTANT]
 > Node.js 22 or newer is required. The dashboard also needs a reachable Quant
 > Alpha backend API to load trading data.
 
-## What the dashboard provides
+## Contents
+
+- [What the Dashboard Provides](#what-the-dashboard-provides)
+- [Architecture](#architecture)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Running the Application](#running-the-application)
+- [Troubleshooting](#troubleshooting)
+- [Tests and Validation](#tests-and-validation)
+- [Project Structure](#project-structure)
+- [Deployment Checklist](#deployment-checklist)
+
+## What the Dashboard Provides
 
 - **Overview** — account NAV, period change, realized and unrealized P&L,
   commissions, trade counts, and open-position coverage.
@@ -49,7 +65,8 @@ the affected dataset as partial instead of presenting incomplete values as exact
 
 - Node.js 22+
 - npm and the committed `package-lock.json`
-- A Quant Alpha backend exposing these routes:
+- A reachable [Quant Alpha Backend](https://github.com/quant-alpha-team/quant-backend/blob/main/README.md)
+  exposing these routes:
 
 | Method | Backend route | Purpose |
 | --- | --- | --- |
@@ -67,40 +84,46 @@ The public backend health route is used by launcher preflight; the dashboard's
 own `/api/health` readiness result also probes protected filter access, so an
 invalid or expired token is reported as offline instead of healthy.
 
-## Quick start
+## Quick Start
 
-1. Install the locked dependencies:
+### 1. Install the dependencies
 
-   ```bash
-   npm ci
-   ```
+```bash
+npm ci
+```
 
-2. Create the local configuration:
+### 2. Configure the environment
 
-   ```bash
-   cp .env.example .env
-   ```
+Copy the [environment template](./.env.example):
 
-   At minimum, set `API_BASE_URL` and `API_TOKEN`. For a trusted local backend
-   without authentication, set `API_AUTH_DISABLED=true` instead.
+```bash
+cp .env.example .env
+```
 
-3. Start the development server:
+Set `API_BASE_URL` when the backend is not at `http://127.0.0.1:8000`, and
+set `API_TOKEN` when backend authentication is enabled. For a trusted local
+backend without authentication, set `API_AUTH_DISABLED=true` instead.
 
-   ```bash
-   npm run dev
-   ```
+### 3. Start the development server
 
-4. Open [http://localhost:3000](http://localhost:3000).
+```bash
+npm run dev
+```
+
+### 4. Verify the dashboard
+
+Open [http://localhost:3000](http://localhost:3000).
 
 To confirm that the dashboard can reach the backend, request
 [http://localhost:3000/api/health](http://localhost:3000/api/health). A healthy
-response is `{ "ok": true }`.
+response contains `"ok": true`.
 
 ## Configuration
 
 The application reads `.env` through Next.js. The optional `quant-web` launcher
 also loads `.env.local` first and then `.env`, without overwriting variables
-already present in the shell.
+already present in the shell. The repository ignores `.env`. If you use
+`.env.local`, keep it untracked because it can contain credentials.
 
 ### Backend connection
 
@@ -144,7 +167,7 @@ otherwise incomplete data.
 Logs rotate daily as `dashboard.log.YYYY-MM-DD`. If the log directory cannot be
 created or written, file logging is disabled and messages continue on stdout.
 
-## Running the application
+## Running the Application
 
 ### npm scripts
 
@@ -155,7 +178,7 @@ created or written, file logging is disabled and messages continue on stdout.
 | `npm run start` | Start a previously built production server |
 | `npm run lint` | Run ESLint |
 | `npm run typecheck` | Run TypeScript without emitting files |
-| `npm test` | Run focused dashboard helper tests |
+| `npm test` | Run dashboard, logging, and reconciliation tests |
 | `npm run check` | Run lint, typecheck, and tests |
 
 For a local production run:
@@ -213,10 +236,39 @@ Maintainers can use the Buildx helper for local or multi-architecture images:
 ./scripts/build.sh --remote
 ```
 
-Remote builds push to both configured registries. Override `REGISTRY_GH` and
-`REGISTRY_GL` when different registry namespaces are required.
+By default, remote builds push the version-tagged image to GHCR. Override
+`REGISTRY_GH` when a different registry namespace is required.
 
-## Project structure
+## Troubleshooting
+
+- **Missing API token** — set `API_TOKEN`, or use
+  `API_AUTH_DISABLED=true` only with a trusted unauthenticated backend.
+- **Dashboard starts without data** — check `API_BASE_URL`, then open
+  `/api/health` and inspect `logs/dashboard.log`.
+- **Refresh times out** — increase `API_SYNC_TIMEOUT_SECONDS`; reconciliation
+  can take longer than normal read requests.
+- **Incomplete tables** — raise the relevant `API_MAX_*_ROWS` value or set it to
+  `0`, taking backend and browser memory usage into account.
+- **Docker cannot reach the backend** — do not use `127.0.0.1` unless the
+  backend runs in the same container; use a shared Docker network or a reachable
+  host address.
+
+For reconciliation and PnL behavior, see the
+[backend reconciliation and PnL guide](https://github.com/quant-alpha-team/quant-backend/blob/main/README.md#reconciliation-and-pnl).
+
+## Tests and Validation
+
+Run the fast validation suite, then create a production build before submitting
+changes:
+
+```bash
+npm run check
+npm run build
+```
+
+Release history is maintained in [CHANGELOG.md](./CHANGELOG.md).
+
+## Project Structure
 
 ```text
 quant-web/
@@ -228,6 +280,7 @@ quant-web/
 │   │   │   └── sync/route.ts       # Reconciliation proxy
 │   │   └── health/route.ts         # Backend health proxy
 │   ├── globals.css                 # Theme and global styles
+│   ├── icon.png                    # Application icon
 │   ├── layout.tsx                  # Root layout
 │   └── page.tsx                    # Dashboard entry page
 ├── bin/
@@ -244,11 +297,17 @@ quant-web/
 ├── lib/
 │   ├── backend-api.ts              # Authenticated API client and pagination
 │   ├── dashboard.ts                # Date, KPI, chart, and formatting helpers
-│   ├── logger.ts                   # Server-side log rotation
+│   ├── logger-core.mjs             # Shared log rotation and retention
+│   ├── logger.ts                   # Next.js logger adapter
+│   ├── reconciliation.ts           # Reconciliation response normalization
+│   ├── trade-executions.ts         # Execution schema and field helpers
 │   └── types.ts                    # Shared TypeScript contracts
 ├── tests/
-│   └── dashboard.test.mts          # Focused helper regression tests
-├── public/                         # Static assets
+│   ├── dashboard.test.mts          # Dashboard helper regression tests
+│   ├── logger.test.mts             # Logger regression tests
+│   └── reconciliation.test.mts     # Reconciliation regression tests
+├── public/
+│   └── QuantAlpha-logo.png         # Dashboard logo
 ├── scripts/
 │   └── build.sh                    # Docker Buildx helper
 ├── .env.example                    # Configuration template
@@ -257,31 +316,34 @@ quant-web/
 └── package.json                    # Scripts and dependencies
 ```
 
-## Troubleshooting
+### Key files
 
-- **Missing API token** — set `API_TOKEN`, or use
-  `API_AUTH_DISABLED=true` only with a trusted unauthenticated backend.
-- **Dashboard starts without data** — check `API_BASE_URL`, then open
-  `/api/health` and inspect `logs/dashboard.log`.
-- **Refresh times out** — increase `API_SYNC_TIMEOUT_SECONDS`; reconciliation
-  can take longer than normal read requests.
-- **Incomplete tables** — raise the relevant `API_MAX_*_ROWS` value or set it to
-  `0`, taking backend and browser memory usage into account.
-- **Docker cannot reach the backend** — do not use `127.0.0.1` unless the
-  backend runs in the same container; use a shared Docker network or a reachable
-  host address.
+| Area | Reference |
+| --- | --- |
+| Environment configuration | [`.env.example`](./.env.example) |
+| Dashboard entry page | [`app/page.tsx`](./app/page.tsx) |
+| Dashboard data proxy | [`app/api/dashboard/data/route.ts`](./app/api/dashboard/data/route.ts) |
+| Backend API client | [`lib/backend-api.ts`](./lib/backend-api.ts) |
+| Dashboard data helpers | [`lib/dashboard.ts`](./lib/dashboard.ts) |
+| Regression tests | [`tests/`](./tests/) |
+| Container build | [`Dockerfile`](./Dockerfile) and [`scripts/build.sh`](./scripts/build.sh) |
+| Release history | [`CHANGELOG.md`](./CHANGELOG.md) |
 
-## Development checks
+## Deployment Checklist
 
-Run the fast validation suite, then create a production build before submitting
-changes:
+1. Run `npm run check` and `npm run build`.
+2. Inject production settings at runtime. Keep backend authentication enabled,
+   provide `API_TOKEN`, and keep environment files out of the image.
+3. Confirm that `API_BASE_URL` is reachable from the frontend runtime,
+   especially when the services use separate containers.
+4. Start the production build or container and make `LOG_DIR` writable when
+   file logs must be retained.
+5. Verify `/api/health`, load each dashboard section, and confirm that
+   reconciliation succeeds when the deployment is expected to use it.
 
-```bash
-npm run check
-npm run build
-```
-
-Release history is maintained in [CHANGELOG.md](./CHANGELOG.md).
+Complete the
+[backend deployment checklist](https://github.com/quant-alpha-team/quant-backend/blob/main/README.md#deployment-checklist)
+before exposing the dashboard.
 
 ---
 
