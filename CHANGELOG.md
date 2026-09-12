@@ -1,3 +1,10 @@
+## v1.2.3 (2026-09-12)
+
+### Fix
+
+- **log**: add delta info to Trade Log part
+- **Readme**: add link and revise some informations
+
 ## v1.2.2 (2026-08-18)
 
 ### Fix

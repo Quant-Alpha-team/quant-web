@@ -347,4 +347,4 @@ before exposing the dashboard.
 
 ---
 
-**Version**: 1.2.2
+**Version**: 1.2.3
