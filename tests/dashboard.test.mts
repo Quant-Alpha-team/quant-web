@@ -14,6 +14,7 @@ import {
 import {
   TRADE_EXECUTION_ROW_SCHEMA,
   TRADE_LOG_INSTRUMENT_COLUMNS,
+  tradeExecutionDelta,
   tradeExecutionExchange,
 } from "../lib/trade-executions.ts";
 
@@ -64,6 +65,26 @@ test("numeric helpers preserve zero and distinguish missing values", () => {
   assert.equal(toOptionalNumber("not-a-number"), null);
   assert.equal(formatNumber(0), "0.00");
   assert.equal(formatNumber(undefined), "—");
+});
+
+test("trade logs retain recorded delta and its provenance", () => {
+  assert.equal(TRADE_EXECUTION_ROW_SCHEMA.delta, "number?");
+  assert.equal(TRADE_EXECUTION_ROW_SCHEMA.delta_source, "string?");
+  assert.equal(TRADE_EXECUTION_ROW_SCHEMA.delta_timestamp, "string?");
+  assert.equal(tradeExecutionDelta({ sec_type: "OPT", delta: -0.2371 }), -0.2371);
+  assert.equal(tradeExecutionDelta({ sec_type: "OPT", delta: "0.4123" }), 0.4123);
+  assert.equal(tradeExecutionDelta({ sec_type: "OPT", delta: 0 }), 0);
+  assert.equal(tradeExecutionDelta({ sec_type: "FOP", delta: "0" }), 0);
+});
+
+test("trade log delta stays missing for stocks and unavailable or invalid Greeks", () => {
+  assert.equal(tradeExecutionDelta({ sec_type: "STK", delta: 1 }), null);
+  assert.equal(tradeExecutionDelta({ delta: 0.4 }), null);
+  for (const delta of [undefined, null, "", " ", "invalid", NaN, Infinity, 1.01, -1.01]) {
+    assert.equal(tradeExecutionDelta({ sec_type: "OPT", delta }), null);
+  }
+  assert.equal(tradeExecutionDelta({ sec_type: "OPT", delta: -1 }), -1);
+  assert.equal(tradeExecutionDelta({ sec_type: "OPT", delta: 1 }), 1);
 });
 
 test("legacy strategy names keep their version when modern fields are null", () => {

@@ -49,6 +49,9 @@ export type TradeExecution = {
   side?: string;
   quantity?: number | string;
   price?: number | string;
+  delta?: number | string | null;
+  delta_source?: string | null;
+  delta_timestamp?: string | null;
   commission?: number | string | null;
   realized_pnl?: number | string | null;
   status?: string;

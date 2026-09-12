@@ -17,9 +17,26 @@ export const TRADE_EXECUTION_ROW_SCHEMA = {
   notes: "string?",
   quantity: "number",
   price: "number",
+  delta: "number?",
+  delta_source: "string?",
+  delta_timestamp: "string?",
   commission: "number?",
   realized_pnl: "number?",
 } as const satisfies Record<keyof TradeExecution, TradeExecutionFieldKind>;
+
+export function tradeExecutionDelta(
+  row: Pick<TradeExecution, "sec_type" | "delta">,
+) {
+  if (!["OPT", "FOP"].includes(row.sec_type?.trim().toUpperCase() ?? "")) {
+    return null;
+  }
+  const raw = row.delta;
+  if (raw === null || raw === undefined || (typeof raw === "string" && !raw.trim())) {
+    return null;
+  }
+  const delta = Number(raw);
+  return Number.isFinite(delta) && delta >= -1 && delta <= 1 ? delta : null;
+}
 
 function actualExchange(value: string | undefined) {
   const normalized = value?.trim().toUpperCase();

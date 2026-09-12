@@ -44,7 +44,10 @@ import {
   todayInTimeZone,
 } from "@/lib/dashboard";
 import type { ReconciliationSyncResult } from "@/lib/reconciliation";
-import { TRADE_LOG_INSTRUMENT_COLUMNS } from "@/lib/trade-executions";
+import {
+  TRADE_LOG_INSTRUMENT_COLUMNS,
+  tradeExecutionDelta,
+} from "@/lib/trade-executions";
 import type {
   AccountEquity,
   DashboardData,
@@ -1715,6 +1718,22 @@ function TradeLogsPanel({
       render: (value) => formatNumber(value),
       csvValue: (value) => toOptionalNumber(value) ?? "",
     }),
+    valueColumn<TradeExecution>("delta", "Delta", tradeExecutionDelta, {
+      align: "right",
+      width: "120px",
+      sortable: true,
+      render: (value, row) => {
+        if (value === null) return "—";
+        const details = [
+          "Entry delta recorded when the option position opened",
+          row.delta_source ? `Source: ${row.delta_source}` : null,
+          row.delta_timestamp
+            ? `Observed: ${formatTimestamp(row.delta_timestamp, timezone)} (${timezone})`
+            : null,
+        ].filter(Boolean).join(" · ");
+        return <span title={details}>{formatNumber(value, 4)}</span>;
+      },
+    }),
     valueColumn<TradeExecution>("commission", "Commission", (row) => row.commission, {
       align: "right",
       render: (value) => commissionTableValue(value),
@@ -1732,14 +1751,25 @@ function TradeLogsPanel({
   const sortedRows = sortByNewest(rows);
 
   return (
-    <Panel title="Raw Trade Executions">
+    <Panel
+      title="Raw Trade Executions"
+      helpText="Delta is the signed entry delta recorded when the option position opened. Hover over a value for its source and observation time. Closing fills do not record a new delta; the original opening execution keeps its delta after the position closes. A dash means no entry delta is available, or the trade is not an option."
+    >
       <div className="flex flex-col gap-3 rounded-md bg-white/[0.05] px-3 py-3 shadow-[0_12px_30px_rgba(0,5,18,0.16)] backdrop-blur xl:flex-row xl:items-center xl:justify-between">
         <div className="font-mono text-[11px] uppercase tracking-normal text-[var(--muted-strong)]">
           {rows.length} records loaded
         </div>
         <CsvDownloadButton
           fileName="trade-logs.csv"
-          fields={columns}
+          fields={[
+            ...columns,
+            csvField<TradeExecution>("Delta Source", (row) =>
+              tradeExecutionDelta(row) === null ? "" : (row.delta_source ?? ""),
+            ),
+            csvField<TradeExecution>("Delta Timestamp", (row) =>
+              tradeExecutionDelta(row) === null ? "" : (row.delta_timestamp ?? ""),
+            ),
+          ]}
           rows={sortedRows}
           disabled={rows.length === 0}
         />
@@ -1752,7 +1782,7 @@ function TradeLogsPanel({
           key={`trades-${rows.length}-${sortedRows[0]?.timestamp ?? "empty"}`}
           rows={sortedRows}
           columns={columns}
-          minWidth="2500px"
+          minWidth="2620px"
           pagination={{ enabled: true, pageSize: 25 }}
         />
       )}
