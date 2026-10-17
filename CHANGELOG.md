@@ -1,3 +1,9 @@
+## v1.2.5 (2026-10-18)
+
+### Fix
+
+- **filters**: unify Safari and Chrome date pickers
+
 ## v1.2.4 (2026-10-17)
 
 ### Fix
