@@ -14,6 +14,7 @@ import {
   WalletCards,
 } from "lucide-react";
 import { SignalIcon, type SignalTone } from "@/components/signal-icon";
+import { DatePicker } from "@/components/date-picker";
 import {
   DATE_PRESETS,
   DEFAULT_TIMEZONES,
@@ -498,21 +499,21 @@ export function SidebarFilters({
 
         {datePreset === "Custom Date" ? (
           <div className="grid grid-cols-2 gap-3">
-            <input
-              aria-label="Start date"
+            <DatePicker
+              label="Start date"
               className={inputClass}
               max={customEnd || today}
-              type="date"
+              today={today}
               value={customStart}
-              onChange={(event) => onCustomStartChange(event.target.value)}
+              onChange={onCustomStartChange}
             />
-            <input
-              aria-label="End date"
+            <DatePicker
+              label="End date"
               className={inputClass}
               min={customStart}
-              type="date"
+              today={today}
               value={customEnd}
-              onChange={(event) => onCustomEndChange(event.target.value)}
+              onChange={onCustomEndChange}
             />
           </div>
         ) : null}
