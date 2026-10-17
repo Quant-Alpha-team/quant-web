@@ -1745,7 +1745,7 @@ function TradeLogsPanel({
     valueColumn<TradeExecution>("status", "Status", (row) => row.status, dashCell),
     valueColumn<TradeExecution>("notes", "Notes", (row) => row.notes, {
       missing: "",
-      wrap: true,
+      fitContent: true,
     }),
   ];
   const sortedRows = sortByNewest(rows);

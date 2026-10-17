@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useLayoutEffect,
   useId,
   useRef,
   useState,
@@ -21,6 +22,8 @@ export type TableColumn<T> = {
   render: (row: T) => React.ReactNode;
   align?: "left" | "right";
   wrap?: boolean;
+  // Keep all loaded values on one line, including rows on other pages.
+  fitContent?: boolean;
   width?: string;
   resizeMinWidth?: number;
   sticky?: "left";
@@ -91,9 +94,86 @@ export function DataTable<T>({
     ? selectedPageSize
     : configuredPageSize;
   const [sort, setSort] = useState<TableSort | null>(null);
-  const [columnWidths, setColumnWidths] = useState<Record<string, number> | null>(
+  const [resizedColumnWidths, setColumnWidths] = useState<Record<string, number> | null>(
     null,
   );
+  const contentMeasurements = useRef<HTMLDivElement>(null);
+  const viewport = useRef<HTMLDivElement>(null);
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const [contentWidths, setContentWidths] = useState<Record<string, number>>({});
+  const fittedColumns = columns.filter((column) => column.fitContent);
+  const pixelWidths =
+    (!minWidth || /^\d+(?:\.\d+)?px$/.test(minWidth)) &&
+    columns.every(
+      (column) => !column.width || /^\d+(?:\.\d+)?px$/.test(column.width),
+    );
+  const fixedWidth = columns.reduce(
+    (total, column) => total + (Number.parseFloat(column.width ?? "0") || 0),
+    0,
+  );
+  const baseWidth = Math.max(
+    viewportWidth,
+    Number.parseFloat(minWidth ?? "0") || 0,
+    fixedWidth,
+  );
+  const automaticColumns = columns.filter((column) => !column.width).length;
+  const automaticWidth = automaticColumns
+    ? (baseWidth - fixedWidth) / automaticColumns
+    : 0;
+
+  function originalColumnWidth(column: TableColumn<T>) {
+    return pixelWidths
+      ? column.width
+        ? Number.parseFloat(column.width)
+        : automaticWidth
+      : 0;
+  }
+
+  // Add only the space beyond this column's original share, preserving others.
+  const fittedWidth = fittedColumns.reduce(
+    (total, column) => total + Math.max(
+      0,
+      (contentWidths[column.key] ?? 0) - originalColumnWidth(column),
+    ),
+    0,
+  );
+  const fittedMinWidth = fittedColumns.length && viewportWidth
+    ? pixelWidths
+      ? `${baseWidth + fittedWidth}px`
+      : `calc(${minWidth ?? "100%"} + ${fittedWidth}px)`
+    : minWidth;
+  const columnWidths = resizedColumnWidths
+    ? Object.fromEntries(columns.map((column) => [
+        column.key,
+        Math.max(resizedColumnWidths[column.key], contentWidths[column.key] ?? 0),
+      ]))
+    : null;
+
+  useLayoutEffect(() => {
+    const measurements = contentMeasurements.current;
+    const region = viewport.current;
+    if (!measurements || !region) return;
+
+    const measure = () => {
+      const widths: Record<string, number> = {};
+      for (const element of measurements.children) {
+        const key = element.getAttribute("data-fit-column");
+        if (key) widths[key] = Math.ceil(element.getBoundingClientRect().width);
+      }
+      setContentWidths((current) =>
+        Object.keys(current).length === Object.keys(widths).length &&
+        Object.entries(widths).every(([key, width]) => current[key] === width)
+          ? current
+          : widths,
+      );
+      setViewportWidth(region.clientWidth);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    for (const element of measurements.children) observer.observe(element);
+    observer.observe(region);
+    return () => observer.disconnect();
+  }, [columns, rows]);
   const minimumTableWidth = useRef<number | null>(null);
   const [resizingColumn, setResizingColumn] = useState<string | null>(null);
   const columnResize = useRef<{
@@ -107,7 +187,7 @@ export function DataTable<T>({
   const tableWidth = columnWidths ? totalColumnWidth(columnWidths) : null;
 
   function columnMinimumWidth(column: TableColumn<T>) {
-    return column.resizeMinWidth ?? 104;
+    return Math.max(column.resizeMinWidth ?? 104, contentWidths[column.key] ?? 0);
   }
 
   function totalColumnWidth(widths: Record<string, number>) {
@@ -316,7 +396,11 @@ export function DataTable<T>({
   function columnStyle(column: TableColumn<T>, columnIndex: number) {
     const resizedWidth = columnWidths?.[column.key];
     const width =
-      resizedWidth === undefined ? column.width : `${resizedWidth}px`;
+      resizedWidth === undefined
+        ? contentWidths[column.key]
+          ? `${Math.max(contentWidths[column.key], originalColumnWidth(column))}px`
+          : column.width
+        : `${resizedWidth}px`;
     const stickyLeft =
       column.sticky === "left"
         ? columnWidths
@@ -391,8 +475,9 @@ export function DataTable<T>({
     : sortedRows;
 
   return (
-    <div className="space-y-3">
+    <div className="relative min-w-0 max-w-full space-y-3">
       <div
+        ref={viewport}
         tabIndex={minWidth || columnWidths ? 0 : undefined}
         role={minWidth || columnWidths ? "region" : undefined}
         aria-label={
@@ -406,12 +491,32 @@ export function DataTable<T>({
           "overscroll-x-contain rounded-md bg-white/[0.07] shadow-[0_18px_42px_var(--shadow)] backdrop-blur-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60"
         }
       >
+        {fittedColumns.length > 0 ? (
+          <div
+            ref={contentMeasurements}
+            aria-hidden="true"
+            className="pointer-events-none invisible absolute inset-x-0 top-0 h-0 overflow-hidden"
+          >
+            {fittedColumns.map((column) => (
+              <div key={column.key} data-fit-column={column.key} className="w-max">
+                <div className="whitespace-nowrap px-4 pr-6 text-xs font-medium uppercase tracking-normal">
+                  {column.label}
+                </div>
+                {rows.map((row, index) => (
+                  <div key={index} className="whitespace-nowrap px-4 text-sm">
+                    {column.render(row)}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : null}
         <table
           aria-label="Data table"
           style={
             tableWidth === null
-              ? minWidth
-                ? { width: "100%", minWidth }
+              ? fittedMinWidth
+                ? { width: "100%", minWidth: fittedMinWidth }
                 : undefined
               : { width: "100%", minWidth: `${tableWidth}px` }
           }
@@ -578,7 +683,9 @@ export function DataTable<T>({
                     <div
                       className={
                         "min-w-0 " +
-                        (column.wrap
+                        (column.fitContent
+                          ? "whitespace-nowrap"
+                          : column.wrap
                           ? "whitespace-normal break-words [overflow-wrap:anywhere]"
                           : "overflow-hidden text-ellipsis whitespace-nowrap")
                       }
