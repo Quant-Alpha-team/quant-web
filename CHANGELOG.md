@@ -1,3 +1,9 @@
+## v1.2.4 (2026-10-17)
+
+### Fix
+
+- **log**: auto-size Notes column without wrapping
+
 ## v1.2.3 (2026-09-12)
 
 ### Fix
