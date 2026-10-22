@@ -27,7 +27,7 @@ RUN --mount=type=cache,id=quant-web-npm,target=/root/.npm \
 FROM deps AS builder
 
 # Copy only the files required by the production build
-COPY tsconfig.json next.config.mjs postcss.config.mjs ./
+COPY tsconfig.json next.config.mjs postcss.config.mjs proxy.ts ./
 COPY app ./app
 COPY components ./components
 COPY lib ./lib

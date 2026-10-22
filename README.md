@@ -158,6 +158,8 @@ otherwise incomplete data.
 | --- | --- | --- |
 | `PORT` | `3000` | Next.js listening port |
 | `HOSTNAME` | `localhost` | Host used by the `quant-web` launcher; the Docker image uses `0.0.0.0` |
+| `WEB_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | Comma-separated host names (any port) the dashboard answers; other `Host` headers get `403` |
+| `WEB_TRUST_PROXY_HEADERS` | `false` | Use `X-Forwarded-Host`/`X-Forwarded-Proto` for the request guard; enable only behind a proxy that overwrites them |
 | `LOG_DIR` | `logs` | Log directory, relative to the project root unless absolute |
 | `LOG_FILE` | `dashboard.log` | Active log filename |
 | `LOG_LEVEL` | `INFO` | Minimum level: `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
@@ -166,6 +168,25 @@ otherwise incomplete data.
 
 Logs rotate daily as `dashboard.log.YYYY-MM-DD`. If the log directory cannot be
 created or written, file logging is disabled and messages continue on stdout.
+
+### Request guard
+
+The dashboard has no login of its own; the server holds the backend token.
+Publish it on loopback only (for example `-p 127.0.0.1:3000:3000`), and
+[`proxy.ts`](./proxy.ts) rejects requests from other sites in the same browser.
+It runs on every route except the build output under `/_next/static/`:
+
+- the `Host` header must be in `WEB_ALLOWED_HOSTS`, which blocks DNS rebinding;
+- `POST` and other unsafe methods that carry an `Origin` header must come from
+  the dashboard's own origin. Requests without `Origin`, such as `curl`, are allowed.
+
+To open the dashboard through another host name, such as a LAN address, add it
+to `WEB_ALLOWED_HOSTS`. Behind a reverse proxy, also set
+`WEB_TRUST_PROXY_HEADERS=true`. The proxy must overwrite (not append to)
+`X-Forwarded-Host` and `X-Forwarded-Proto`, and be the only route to the container.
+Clients can set those headers themselves, so trusting them without such a proxy
+reopens DNS rebinding. Image optimization is disabled (`images.unoptimized`)
+because the optimizer re-requests images without the browser's `Host`.
 
 ## Running the Application
 
@@ -326,6 +347,7 @@ quant-web/
 | Dashboard entry page | [`app/page.tsx`](./app/page.tsx) |
 | Dashboard data proxy | [`app/api/dashboard/data/route.ts`](./app/api/dashboard/data/route.ts) |
 | Backend API client | [`lib/backend-api.ts`](./lib/backend-api.ts) |
+| Request guard | [`proxy.ts`](./proxy.ts) and [`lib/request-guard.ts`](./lib/request-guard.ts) |
 | Dashboard data helpers | [`lib/dashboard.ts`](./lib/dashboard.ts) |
 | Regression tests | [`tests/`](./tests/) |
 | Container build | [`Dockerfile`](./Dockerfile) and [`scripts/build.sh`](./scripts/build.sh) |

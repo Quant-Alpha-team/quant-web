@@ -4,28 +4,8 @@ import { logError, logInfo, logWarning } from "@/lib/logger";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-// Browsers always send Origin on POST. A mismatch means another site (or another
-// localhost port) is driving the request, so it must not start a reconciliation.
-// Requests without Origin come from non-browser clients and are not CSRF vectors.
-function isCrossOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  if (!origin) return false;
-  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  try {
-    return new URL(origin).host !== host;
-  } catch {
-    return true;
-  }
-}
-
-export async function POST(request: Request) {
-  if (isCrossOrigin(request)) {
-    logWarning("Rejected cross-origin synchronization request", { origin: request.headers.get("origin") });
-    return Response.json(
-      { ok: false, error: { code: "forbidden_origin", message: "Cross-origin synchronization requests are not allowed." } },
-      { status: 403 },
-    );
-  }
+// Host and Origin checks for this endpoint live in proxy.ts.
+export async function POST() {
   try {
     logInfo("Trading data synchronization started");
     const result = await syncTradingData();

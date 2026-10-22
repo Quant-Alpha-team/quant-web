@@ -17,10 +17,6 @@ const routeSource = readFileSync(new URL("../app/api/dashboard/sync/route.ts", i
   .replace('"@/lib/backend-api"', JSON.stringify(backendUrl))
   .replace(/import .* from "@\/lib\/logger";/, "const logError = () => {}; const logInfo = () => {}; const logWarning = () => {};");
 const route = await import(compile(routeSource));
-const syncRequest = (origin = "http://localhost:3000") => new Request("http://localhost:3000/api/dashboard/sync", {
-  method: "POST",
-  headers: { host: "localhost:3000", origin },
-});
 
 test("backend typed error and actual sync proxy preserve conflict; failures stay distinct", async (t) => {
   t.mock.method(globalThis, "fetch", async () => Response.json({ ok: false, error: {
@@ -31,13 +27,13 @@ test("backend typed error and actual sync proxy preserve conflict; failures stay
     assert.equal((error as { code: string }).code, "sync_in_progress");
     return true;
   });
-  const response = await route.POST(syncRequest());
+  const response = await route.POST();
   assert.equal(response.status, 409);
   assert.equal((await response.json()).error.code, "sync_in_progress");
   t.mock.method(globalThis, "fetch", async () => Response.json({ ok: false, error: {
     code: "reconciliation_failed", message: "Failed",
   } }, { status: 502 }));
-  const failed = await route.POST(syncRequest());
+  const failed = await route.POST();
   assert.equal(failed.status, 503);
   assert.equal((await failed.json()).error.code, "synchronization_failed");
 });
@@ -53,7 +49,7 @@ test("headers timeout checks the lease without repeating POST; only active lease
       if (status === "unavailable") throw new Error("status connection failed");
       return Response.json({ ok: true, data: { status, expires_at: null } });
     });
-    const response = await route.POST(syncRequest());
+    const response = await route.POST();
     assert.equal(response.status, status === "in_progress" ? 409 : 503);
     assert.equal((await response.json()).error.code, status === "in_progress" ? "sync_in_progress" : "synchronization_failed");
     assert.deepEqual(calls, [
@@ -61,14 +57,4 @@ test("headers timeout checks the lease without repeating POST; only active lease
       "GET /api/trading/reconciliation/status/",
     ]);
   }
-});
-
-test("sync rejects cross-origin browser requests before contacting the backend", async (t) => {
-  const fetchMock = t.mock.method(globalThis, "fetch", async () => Response.json({ ok: true, data: {} }));
-  for (const origin of ["https://evil.example", "http://localhost:8080", "null"]) {
-    const response = await route.POST(syncRequest(origin));
-    assert.equal(response.status, 403);
-    assert.equal((await response.json()).error.code, "forbidden_origin");
-  }
-  assert.equal(fetchMock.mock.callCount(), 0);
 });

@@ -10,6 +10,9 @@
 !next.config.mjs
 !postcss.config.mjs
 
+# Request guard (Next.js proxy) runs before every route
+!proxy.ts
+
 # Application source and public assets
 !app/
 !app/**
