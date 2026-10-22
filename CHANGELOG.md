@@ -1,3 +1,9 @@
+## v1.2.6 (2026-10-22)
+
+### Fix
+
+- **build**: upgrade Node.js runtime to 24.22.1
+
 ## v1.2.5 (2026-10-18)
 
 ### Fix

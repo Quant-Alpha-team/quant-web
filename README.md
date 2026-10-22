@@ -349,7 +349,7 @@ before exposing the dashboard.
 
 ---
 
-**Version**: 1.2.5
+**Version**: 1.2.6
 
 Existing explicit API_SYNC_TIMEOUT_SECONDS=180 overrides should be increased for the full pipeline; the default is 900 seconds.
 
