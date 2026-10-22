@@ -1,5 +1,7 @@
 "use client";
 
+import { monitorReconciliation, ReconciliationRequestError } from "@/lib/reconciliation-monitor";
+
 import {
   useEffect,
   useId,
@@ -65,6 +67,7 @@ type ApiResponse<T> = {
   ok: boolean;
   data: T;
   error?: {
+    code?: string;
     message?: string;
   };
 };
@@ -125,7 +128,7 @@ const secondaryButtonClass =
 async function readApi<T>(response: Response): Promise<T> {
   const payload = (await response.json()) as ApiResponse<T>;
   if (!response.ok || !payload.ok) {
-    throw new Error(payload.error?.message || `Request failed: ${response.status}`);
+    throw new ReconciliationRequestError(payload.error?.message || `Request failed: ${response.status}`, response.status, payload.error?.code);
   }
   return payload.data;
 }
@@ -1869,9 +1872,20 @@ export function DashboardShell() {
   const [loadedQueryKey, setLoadedQueryKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [waitingForSync, setWaitingForSync] = useState(false);
+  const syncRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => syncRequest.current?.abort(), []);
+  useEffect(() => {
+    if (!waitingForSync) return;
+    return monitorReconciliation(() => {
+      setWaitingForSync(false);
+      setSyncing(false);
+      setSyncError(null);
+    }, setSyncError);
+  }, [waitingForSync]);
   const [filterError, setFilterError] = useState<string | null>(null);
   const [dataError, setDataError] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
   const [lastSyncResult, setLastSyncResult] =
     useState<ReconciliationSyncResult | null>(null);
   const [health, setHealth] = useState<HealthState>({
@@ -2171,23 +2185,37 @@ export function DashboardShell() {
   }
 
   async function handleRefresh() {
+    if (syncRequest.current || syncing) return;
+    const controller = new AbortController();
+    syncRequest.current = controller;
+    let inProgress = false;
+    setLastSyncResult(null);
     setSyncing(true);
     setSyncError(null);
 
     try {
       const response = await fetch("/api/dashboard/sync", {
+        signal: controller.signal,
         method: "POST",
         cache: "no-store",
       });
       const result = await readApi<ReconciliationSyncResult>(response);
+      if (controller.signal.aborted) return;
       setLastSyncResult(result);
       setLoadedQueryKey(null);
       setRefreshKey((value) => value + 1);
       setHealthRefreshKey((value) => value + 1);
     } catch (error) {
-      setSyncError(error instanceof Error ? error.message : String(error));
+      if (controller.signal.aborted) return;
+      if (error instanceof ReconciliationRequestError && error.status === 409 && error.code === "sync_in_progress") {
+        inProgress = true;
+        setWaitingForSync(true);
+      } else {
+        setSyncError(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      setSyncing(false);
+      syncRequest.current = null;
+      if (!controller.signal.aborted && !inProgress) setSyncing(false);
     }
   }
 
@@ -2442,7 +2470,7 @@ export function DashboardShell() {
           ) : null}
           {syncError ? (
             <StatusMessage tone="error">
-              Trading data sync failed: {syncError}
+              {waitingForSync ? "Synchronization status unavailable: " : "Trading data sync failed: "}{syncError}
             </StatusMessage>
           ) : null}
           {!syncing &&
@@ -2455,7 +2483,7 @@ export function DashboardShell() {
             </StatusMessage>
           ) : null}
           {syncing ? (
-            <StatusMessage tone="loading">Reconciling trading data with IBKR...</StatusMessage>
+            <StatusMessage tone="loading">{waitingForSync ? "Trading data synchronization is in progress..." : "Reconciling trading data with IBKR..."}</StatusMessage>
           ) : loading ? (
             <StatusMessage tone="loading">Loading dashboard data...</StatusMessage>
           ) : null}

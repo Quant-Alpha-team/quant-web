@@ -39,7 +39,7 @@ type RequestJsonOptions = {
 export class BackendApiError extends Error {
   readonly clientMessage: string;
 
-  constructor(message: string, clientMessage = "Backend service request failed.") {
+  constructor(message: string, clientMessage = "Backend service request failed.", readonly status = 503, readonly code = "backend_failure") {
     super(message);
     this.name = "BackendApiError";
     this.clientMessage = clientMessage;
@@ -167,7 +167,7 @@ const apiConfig = {
   token: (process.env.API_TOKEN || "").trim().replace(/^token\s+/i, ""),
   authDisabled: boolEnv("API_AUTH_DISABLED", false),
   timeoutSeconds: intEnv("API_TIMEOUT_SECONDS", 15),
-  syncTimeoutSeconds: intEnv("API_SYNC_TIMEOUT_SECONDS", 180),
+  syncTimeoutSeconds: intEnv("API_SYNC_TIMEOUT_SECONDS", 900),
   pageSize: intEnv("API_PAGE_SIZE", 500, 2000),
   maxExecRows: optionalRowCap("API_MAX_EXEC_ROWS", 5000),
   maxPerfRows: optionalRowCap("API_MAX_PERF_ROWS", 5000),
@@ -284,6 +284,7 @@ async function requestJson<T>(
     throw new BackendApiError(
       `Failed to connect to backend API at ${apiConfig.baseUrl}: ${message}`,
       "Backend service is unavailable.",
+      503, "backend_transport_failure",
     );
   } finally {
     clearTimeout(timeout);
@@ -291,9 +292,17 @@ async function requestJson<T>(
 
   if (!response.ok) {
     const body = (await response.text()).slice(0, 1000);
+    let code = "backend_failure";
+    try {
+      const parsed = JSON.parse(body);
+      if (typeof parsed?.error?.code === "string") code = parsed.error.code;
+    } catch { /* Non-JSON failures use the generic code. */ }
     throw new BackendApiError(
       `API request failed (${response.status}) for ${path}: ${body}`,
-      "Backend service rejected the data request.",
+      response.status === 409 && code === "sync_in_progress"
+        ? "Trading data synchronization is already in progress."
+        : "Backend service rejected the data request.",
+      response.status, code,
     );
   }
 
@@ -755,4 +764,11 @@ export function getStrategyPositions(params: PositionParams) {
     normalizeStrategyPosition,
     params.rowBudget,
   );
+}
+
+export async function getReconciliationStatus() {
+  const response = await requestJson<{ status: "idle" | "in_progress"; expires_at: string | null }>(
+    "/api/trading/reconciliation/status/",
+  );
+  return response.data;
 }

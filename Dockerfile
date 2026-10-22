@@ -1,7 +1,7 @@
 # ==========================================
 # Stage 1: Dependencies (Install Once)
 # ==========================================
-FROM node:22-alpine AS deps
+FROM node:24.22.1-alpine AS deps
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NPM_CONFIG_AUDIT=false
@@ -37,7 +37,7 @@ RUN npm run build
 # ==========================================
 # Stage 3: Runtime (Slim Execution)
 # ==========================================
-FROM node:22-alpine AS runner
+FROM node:24.22.1-alpine AS runner
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

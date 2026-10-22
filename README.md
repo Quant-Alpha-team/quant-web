@@ -8,7 +8,7 @@ For backend setup, authentication, API, reconciliation, and deployment details,
 see the [Quant Alpha Backend README](https://github.com/quant-alpha-team/quant-backend/blob/main/README.md).
 
 > [!IMPORTANT]
-> Node.js 22 or newer is required. The dashboard also needs a reachable Quant
+> Node.js 24.22.1 or newer is required. The dashboard also needs a reachable Quant
 > Alpha backend API to load trading data.
 
 ## Contents
@@ -63,7 +63,7 @@ the affected dataset as partial instead of presenting incomplete values as exact
 
 ## Requirements
 
-- Node.js 22+
+- Node.js 24.22.1+ (pinned in `.nvmrc`)
 - npm and the committed `package-lock.json`
 - A reachable [Quant Alpha Backend](https://github.com/quant-alpha-team/quant-backend/blob/main/README.md)
   exposing these routes:
@@ -133,7 +133,7 @@ already present in the shell. The repository ignores `.env`. If you use
 | `API_TOKEN` | empty | Token sent in the server-side `Authorization` header |
 | `API_AUTH_DISABLED` | `false` | Disables the authorization header; use only for trusted local backends |
 | `API_TIMEOUT_SECONDS` | `15` | Timeout for normal backend requests and launcher preflight |
-| `API_SYNC_TIMEOUT_SECONDS` | `180` | Timeout for reconciliation requests |
+| `API_SYNC_TIMEOUT_SECONDS` | `900` | Timeout for the full reconciliation pipeline (including the 300s SPX phase) |
 | `API_PAGE_SIZE` | `500` | Rows requested per backend page; capped at `2000` |
 | `DASHBOARD_API_CONCURRENCY` | `4` | Maximum concurrent backend dataset/scope requests; capped at `8` |
 | `API_PREFLIGHT_STRICT` | `false` | Makes the `quant-web` launcher exit when its backend preflight fails |
@@ -246,7 +246,9 @@ By default, remote builds push the version-tagged image to GHCR. Override
 - **Dashboard starts without data** — check `API_BASE_URL`, then open
   `/api/health` and inspect `logs/dashboard.log`.
 - **Refresh times out** — increase `API_SYNC_TIMEOUT_SECONDS`; reconciliation
-  can take longer than normal read requests.
+  can take longer than normal read requests. Runtime or upstream timeouts may
+  still close the connection earlier; the dashboard checks the lease and waits
+  while synchronization remains active.
 - **Incomplete tables** — raise the relevant `API_MAX_*_ROWS` value or set it to
   `0`, taking backend and browser memory usage into account.
 - **Docker cannot reach the backend** — do not use `127.0.0.1` unless the
@@ -348,3 +350,7 @@ before exposing the dashboard.
 ---
 
 **Version**: 1.2.5
+
+Existing explicit API_SYNC_TIMEOUT_SECONDS=180 overrides should be increased for the full pipeline; the default is 900 seconds.
+
+API_SYNC_TIMEOUT_SECONDS is the application abort budget, not a guarantee that the connection remains open: runtime or upstream header timeouts may end it earlier. After a sync transport failure, the server checks reconciliation status and the dashboard polls an active lease without resubmitting the POST. Idle or unavailable status preserves the failure; lease release does not imply success.

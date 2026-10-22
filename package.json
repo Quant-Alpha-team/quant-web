@@ -6,13 +6,16 @@
   "bin": {
     "quant-web": "./bin/quant-web.mjs"
   },
+  "engines": {
+    "node": ">=24.22.1"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit --incremental false",
-    "test": "node --test --experimental-strip-types tests/*.test.mts",
+    "test": "node --test tests/*.test.mts",
     "check": "npm run lint && npm run typecheck && npm test"
   },
   "dependencies": {
@@ -24,7 +27,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^24.19.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

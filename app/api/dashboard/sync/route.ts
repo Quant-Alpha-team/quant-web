@@ -1,4 +1,4 @@
-import { safeBackendErrorMessage, syncTradingData } from "@/lib/backend-api";
+import { BackendApiError, getReconciliationStatus, safeBackendErrorMessage, syncTradingData } from "@/lib/backend-api";
 import { logError, logInfo, logWarning } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +22,24 @@ export async function POST() {
     }
     return Response.json({ ok: true, data: result });
   } catch (error) {
+    if (error instanceof BackendApiError && error.status === 409 && error.code === "sync_in_progress") {
+      return Response.json({ ok: false, error: { code: error.code, message: error.clientMessage } }, { status: 409 });
+    }
+    // A transport timeout does not cancel the backend's reconciliation.
+    // Check ownership before deciding whether the browser should keep waiting.
+    if (error instanceof BackendApiError && error.code === "backend_transport_failure") {
+      try {
+        const status = await getReconciliationStatus();
+        if (status?.status === "in_progress") {
+          return Response.json({ ok: false, error: {
+            code: "sync_in_progress",
+            message: "Trading data synchronization is already in progress.",
+          } }, { status: 409 });
+        }
+      } catch {
+        // An unavailable status or an idle lease cannot establish success.
+      }
+    }
     const internalMessage = error instanceof Error ? error.message : String(error);
     logError("Trading data synchronization failed", { error: internalMessage });
     return Response.json(
