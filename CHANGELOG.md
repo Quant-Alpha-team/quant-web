@@ -1,3 +1,10 @@
+## v1.2.7 (2026-10-22)
+
+### Fix
+
+- **security**: guard all routes against DNS rebinding and cross-site requests
+- **sync**: reject cross-origin synchronization requests
+
 ## v1.2.6 (2026-10-22)
 
 ### Fix
